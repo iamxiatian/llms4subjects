@@ -1,0 +1,57 @@
+[tool.poetry]
+name = "proofcheck"
+version = "1.0"
+description = ""
+authors = ["XiaTian <xiat@ruc.edu.cn>"]
+readme = "README.md"
+packages = [
+    { include = "proofcheck" }
+]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+python-dotenv = "^1.0.1"
+pyhocon = "^0.3.61"
+openpyxl = "^3.1.5"
+python-levenshtein = "^0.25.1"
+hanlp = "^2.1.0b58"
+pandas = "^2.2.3"
+transformers = "^4.45.2"
+accelerate = "^1.0.1"
+#langchain = "^0.3.1"
+#langchain-community = "^0.3.3"
+ctranslate2 = "^4.5.0"
+fire = "^0.7.0"
+
+
+[tool.poetry.group.cpu.dependencies]
+torch = {version = "^2.5.0"}
+torchvision = {version = "^0.20.0"}
+torchaudio = {version = "^2.5.0"}
+faiss-cpu = "^1.9.0"
+
+
+[tool.poetry.group.gpu.dependencies]  
+torch = {version = "^2.5.0+cu118", source = "pytorch-gpu"}
+torchvision = {version = "^0.20.0+cu118", source = "pytorch-gpu"}
+torchaudio = {version = "^2.5.0+cu118", source = "pytorch-gpu"}
+faiss-gpu = "^1.7.2"
+
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
+
+[[tool.poetry.source]]
+name = "ali"
+url = "https://mirrors.aliyun.com/pypi/simple"
+priority = "primary"
+
+
+[[tool.poetry.source]]
+name = "pytorch-gpu"
+url = "https://download.pytorch.org/whl/cu118"
+priority = "explicit"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
