@@ -22,6 +22,7 @@ torch = {version = "^2.5.0+cu118", source = "pytorch-gpu"}
 torchvision = {version = "^0.20.0+cu118", source = "pytorch-gpu"}
 torchaudio = {version = "^2.5.0+cu118", source = "pytorch-gpu"}
 faiss-gpu = "^1.7.2"
+pyld = "^2.0.4"
 
 
 [tool.poetry.group.dev.dependencies]
