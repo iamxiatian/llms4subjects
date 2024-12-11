@@ -33,16 +33,24 @@ def translate_names(out_file:str = "name-mapping.jsonline"):
         if "Related Subjects" in entry:
             names.extend(entry["Related Subjects"])
             
+    # 先读取输出文件，避免重复处理
+    with open(out_file, "r", encoding="utf-8") as f:
+        items = [json.loads(line) for line in f.readlines() ]
+        generated_names = { item["name"] for item in items }
+        
+    # 开始生成subject的英文和德文版本的名称  
     names = set(names)
-    with open(out_file, "w", encoding="utf-8") as f:
+    with open(out_file, "a+", encoding="utf-8") as f:
         for name in tqdm(names):
-            en = translate_by_llm(name, "English")
-            de = translate_by_llm(name, "German")
-            json_record = json.dumps(
-                { "name": name, "EN": en, "DE": de},
-                ensure_ascii=False)
-            f.write(json_record + '\n')
-            f.flush()
+            if name not in generated_names:
+                json_record = json.dumps(generated_names[name])
+                en = translate_by_llm(name, "English")
+                de = translate_by_llm(name, "German")
+                json_record = json.dumps(
+                    { "name": name, "EN": en, "DE": de},
+                    ensure_ascii=False)
+                f.write(json_record + '\n')
+                f.flush()
             
 if __name__ == '__main__':
     translate_names()
