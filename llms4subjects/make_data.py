@@ -4,6 +4,7 @@ from pyld import jsonld
 import json
 from pathlib import Path
 from tqdm import tqdm
+from llms4subjects.TIBKAT import TibkatDb
 
 """把图书、论文等文献的jsonld格式的内容，抽取出title、abstract和GND_ID，并存为jsonline格式，方便后续读取处理"""
 def parse_jsonld(jsonld_file:Path) -> str|None:
@@ -35,8 +36,29 @@ def convert_jsonld_to_lines(train_dir:str, out_file:str):
             json_record = parse_jsonld(jsonld_file)
             f.write(json_record + '\n')
     
+def save_sqlite():
+    db = TibkatDb()
+    """把导出的内容存入sqlite数据库"""
+    processed_ids = set()
+    with open("TIBKAT-all.jsonline", "r", encoding="utf-8") as f:
+        for line in tqdm(f.readlines()):
+            record = json.loads(line)
+            id, title, abstract, gnd_ids =  record["id"],record["title"], record["abstract"],record["gnd_ids"]
+            processed_ids.add(id)
+            db.insert_one(id, title, abstract, "", gnd_ids)
+            
+    with open("TIBKAT-core.jsonline", "r", encoding="utf-8") as f:
+        for line in tqdm(f.readlines()):
+            record = json.loads(line)
+            id, title, abstract, gnd_ids =  record["id"],record["title"], record["abstract"],record["gnd_ids"]
+            if id not in processed_ids:
+                db.insert_one(id, title, abstract, "", gnd_ids)
+            
+        
 
 if __name__ == '__main__':
     convert_jsonld_to_lines("./data/shared-task-datasets/TIBKAT/all-subjects/data/train/", "TIBKAT-all.jsonline")
     
     convert_jsonld_to_lines("./data/shared-task-datasets/TIBKAT/tib-core-subjects/data/train/", "TIBKAT-core.jsonline")
+    
+    

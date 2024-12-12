@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 bot = LLM(
-    base_url="http://14.152.45.76:3073/v1",
+    base_url="http://10.96.1.42:12435/v1",
     model="llama3.3:latest",
 )
 

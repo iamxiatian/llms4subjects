@@ -43,7 +43,6 @@ def translate_names(out_file:str = "name-mapping.jsonline"):
     with open(out_file, "a+", encoding="utf-8") as f:
         for name in tqdm(names):
             if name not in generated_names:
-                json_record = json.dumps(generated_names[name])
                 en = translate_by_llm(name, "English")
                 de = translate_by_llm(name, "German")
                 json_record = json.dumps(
