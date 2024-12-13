@@ -8,13 +8,17 @@ GND subject信息，存放在db/subjuect/core或者db/subject/all目录下，目
 """
 
 import json
+from dataclasses import dataclass
+from pathlib import Path
+from sqlite3 import Row
+
 import faiss
 import numpy as np
 from tqdm import tqdm
-from llms4subjects.translate import translate_by_llm
+
+from llms4subjects.api import EMBEDDING_DIM, get_embedding
 from llms4subjects.sqlite import SqliteDb
-from pathlib import Path
-from llms4subjects.api import get_embedding
+from llms4subjects.translate import translate_by_llm
 
 GND_subjects_all_file = (
     "data/shared-task-datasets/GND/dataset/GND-Subjects-all.json"
@@ -24,7 +28,31 @@ GND_subjects_core_file = (
     "data/shared-task-datasets/GND/dataset/GND-Subjects-tib-core.json"
 )
 
-EMBEDDING_DIM = 1024
+
+@dataclass
+class Subject:
+    code: str
+    name: str
+    cls_num: str
+    cls_name: str
+    alternate_names: list[str]
+    related_subjects: list[str]
+    source: str
+    definition: str
+
+    @classmethod
+    def from_row(cls, row: Row) -> "Subject":
+        """从sqlite3.Row对象创建实例"""
+        return cls(
+            code=row["code"],
+            name=row["name"],
+            cls_num=row["cls_num"],
+            cls_name=row["cls_name"],
+            alternate_names=row["alternate_names"].split("\n"),
+            related_subjects=row["related_subjects"].split("\n"),
+            source=row["source"],
+            definition=row["definition"],
+        )
 
 
 class SubjectDb(SqliteDb):
@@ -71,6 +99,13 @@ class SubjectDb(SqliteDb):
             definition,
         )
         return self.insert(sql, value)
+
+    def get_subject_by_code(self, code: str) -> Subject:
+        sql = "SELECT * from subject WHERE code = ?"
+        rows = self.query(sql=sql, parameters=(code,))
+        if not rows:
+            print(f"Error: no subject for code: {code}")
+        return Subject.from_row(rows[0])
 
     def insert_name_code_id(
         self,
@@ -182,5 +217,5 @@ def initialize(gnd_file: str, db_home: Path):
 
 if __name__ == "__main__":
     # translate_names()
-    #initialize(GND_subjects_core_file, Path("./db/subject/core"))
+    # initialize(GND_subjects_core_file, Path("./db/subject/core"))
     initialize(GND_subjects_all_file, Path("./db/subject/all"))

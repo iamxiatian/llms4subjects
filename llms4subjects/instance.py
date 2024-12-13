@@ -33,7 +33,8 @@ from llms4subjects.sqlite import SqliteDb
 
 def _parse_jsonld(jsonld_file: Path) -> dict | None:
     tibkat_id = jsonld_file.stem
-
+    language = jsonld_file.parent.name
+    doctype = jsonld_file.parent.parent.name
     # 读取JSON-LD文件
     with open(jsonld_file, "r", encoding="utf-8") as file:
         data = json.load(file)
@@ -51,6 +52,8 @@ def _parse_jsonld(jsonld_file: Path) -> dict | None:
                 "title": title,
                 "abstract": abstract,
                 "gnd_codes": gnd_codes,
+                "language": language,
+                "doctype": doctype,
             }
             return entry
 
@@ -73,28 +76,45 @@ class Instance:
     title: str
     abstract: str
     gnd_codes: list[str]
+    language: str
+    doctype: str
 
     @classmethod
     def from_row(cls, row: Row) -> "Instance":
         """从sqlite3.Row对象创建实例"""
         return cls(
-            embedding_id=row["id"],
+            embedding_id=row["embedding_id"],
             instance_id=row["instance_id"],
             title=row["title"],
             abstract=row["abstract"],
             gnd_codes=row["gnd_codes"].split(","),
+            language=row["language"],
+            doctype=row["doctype"],
         )
 
 
 class InstanceDb(SqliteDb):
+    """存放实例数据和实例与主题code映射关系的数据库，为方便和embedding对齐，
+    instance表中的embedding_id从0开始编号"""
+
     def __init__(self, db_file: str):
         SqliteDb.__init__(self, db_file)
         self.create_table("""CREATE TABLE IF NOT EXISTS instance (  
-            id INTEGER PRIMARY KEY,              
+            embedding_id INTEGER PRIMARY KEY,              
             instance_id TEXT NOT NULL UNIQUE,
             title TEXT NOT NULL,
             abstract TEXT,
-            gnd_codes TEXT NOT NULL
+            gnd_codes TEXT NOT NULL,
+            language TEXT NOT NULL,
+            doctype TEXT NOT NULL
+        );""")
+
+        self.create_table("""CREATE TABLE IF NOT EXISTS mapping (  
+            seq_id INTEGER PRIMARY KEY,              
+            instance_id TEXT NOT NULL,
+            gnd_code TEXT NOT NULL,
+            language TEXT NOT NULL,
+            doctype TEXT NOT NULL
         );""")
 
     def insert_instance(
@@ -104,8 +124,10 @@ class InstanceDb(SqliteDb):
         title: str,
         abstract: str,
         gnd_codes: list[str],
+        language: str,
+        doctype: str,
     ) -> int:
-        sql = """INSERT INTO instance (id, instance_id, title, abstract, gnd_codes)   VALUES (?, ?, ?, ?, ?)"""
+        sql = """INSERT INTO instance (embedding_id, instance_id, title, abstract, gnd_codes, language, doctype)   VALUES (?, ?, ?, ?, ?, ?, ?)"""
 
         value = (
             embedding_id,
@@ -113,8 +135,25 @@ class InstanceDb(SqliteDb):
             title,
             abstract,
             ",".join(gnd_codes),
+            language,
+            doctype,
         )
         return self.insert(sql, value)
+
+    def insert_mapping(
+        self,
+        seq_id: int,
+        instance_id: str,
+        gnd_code: str,
+        language: str,
+        doctype: str,
+    ) -> int:
+        sql = """INSERT INTO mapping (seq_id, instance_id, gnd_code, language, doctype)  VALUES (?, ?, ?, ?, ?)"""
+
+        return self.insert(
+            sql,
+            (seq_id,instance_id,gnd_code,language, doctype,),
+        )
 
     def get_by_instance_ids(self, instance_ids: list[str]) -> list[Instance]:
         # 加上引号， 拼接成'id1', 'id2'的形式
@@ -123,8 +162,7 @@ class InstanceDb(SqliteDb):
         return [Instance.from_row(row) for row in self.query(sql=sql)]
 
     def get_by_embedding_id(self, embedding_id: int) -> Instance:
-        # 加上引号， 拼接成'id1', 'id2'的形式
-        sql = "SELECT * from record WHERE id = ?"
+        sql = "SELECT * from instance WHERE embedding_id = ?"
         rows = self.query(sql=sql, parameters=(embedding_id,))
         return Instance.from_row(rows[0])
 
@@ -152,22 +190,38 @@ def initialize(
     index: faiss.IndexFlatIP = faiss.IndexFlatIP(EMBEDDING_DIM)
 
     embedding_id = 0
+    seq_id = 1 # instance和gnd_code的映射关系
     jsonline_reader = jsonline_file.open("r", encoding="utf-8")
     for line in tqdm(jsonline_reader.readlines()):
         instance = json.loads(line)
-        tibkat_id, title, abstract, gnd_codes = (
+        tibkat_id, title, abstract, gnd_codes, language, doctype = (
             instance["id"],
             instance["title"],
             instance["abstract"],
             instance["gnd_codes"],
+            instance["language"],
+            instance["doctype"],
         )
 
-        # 读出gnd_id
+        # 读出gnd_codes, 并保证gnd code的开始一定为"gnd:"
         start = len("http://d-nb.info/gnd/")
         gnd_codes = [e["@id"][start:] for e in gnd_codes]
-        
-        db.insert_instance(embedding_id, tibkat_id, title, abstract, gnd_codes)
+        gnd_codes = [f"gnd:{c}" for c in gnd_codes] 
+
+        db.insert_instance(
+            embedding_id,
+            tibkat_id,
+            title,
+            abstract,
+            gnd_codes,
+            language,
+            doctype,
+        )
         embedding_id += 1
+        
+        for code in gnd_codes:
+            db.insert_mapping(seq_id, tibkat_id, code, language, doctype)
+            seq_id += 1
 
         text = f"""title: "{title}"\n abstract: {abstract}"""
         embedding = get_embedding(text)
@@ -202,6 +256,7 @@ class EmbeddingQuery:
         q = np.array(get_embedding(text), dtype=np.float32).reshape(1, -1)
         _, labels = self.index.search(q, topk)
         label_ids: list[int] = labels[0].tolist()
+        print(label_ids)
         instances = [self.db.get_by_embedding_id(i) for i in label_ids]
         return instances
 
@@ -209,14 +264,61 @@ class EmbeddingQuery:
         self.db.close()
 
 
+# def initialize2(
+#     train_jsonld_dir: str, dev_jsonld_dir: str, db_home: Path
+# ) -> None:
+#     """初始化，生成embedding等文件"""
+#     db_home.mkdir(parents=True, exist_ok=True)
+#     db = InstanceDb(Path(db_home, "instance.sqlite").as_posix())
+#     jsonline_file = Path(db_home, "instance.jsonline")
+
+#     embedding_id = 0
+#     seq_id = 1 # instance和gnd_code的映射关系
+
+#     jsonline_reader = jsonline_file.open("r", encoding="utf-8")
+#     for line in tqdm(jsonline_reader.readlines()):
+#         instance = json.loads(line)
+#         tibkat_id, title, abstract, gnd_codes, language, doctype = (
+#             instance["id"],
+#             instance["title"],
+#             instance["abstract"],
+#             instance["gnd_codes"],
+#             instance["language"],
+#             instance["doctype"],
+#         )
+
+#         # 读出gnd_id
+#         start = len("http://d-nb.info/gnd/")
+#         gnd_codes = [e["@id"][start:] for e in gnd_codes]
+#         gnd_codes = [f"gnd:{c}" for c in gnd_codes] 
+        
+#         db.insert_instance(
+#             embedding_id,
+#             tibkat_id,
+#             title,
+#             abstract,
+#             gnd_codes,
+#             language,
+#             doctype,
+#         )
+#         embedding_id += 1
+
+#         for code in gnd_codes:
+#             db.insert_mapping(seq_id, tibkat_id, code, language, doctype)
+#             seq_id += 1
+            
+#     jsonline_reader.close()
+#     db.close()
+
+
 if __name__ == "__main__":
-    initialize(
+    initialize2(
         "./data/shared-task-datasets/TIBKAT/tib-core-subjects/data/train/",
         "./data/shared-task-datasets/TIBKAT/tib-core-subjects/data/dev/",
         Path("./db/instance/core"),
     )
 
-    initialize(
+    initialize2(
         "./data/shared-task-datasets/TIBKAT/all-subjects/data/train/",
         "./data/shared-task-datasets/TIBKAT/all-subjects/data/dev/",
         Path("./db/instance/all"),
