@@ -3,9 +3,10 @@ TIBKAT实例数据处理，存放在db/instance/core或者db/instance/all目录�
 存在以下文件：
 
 - instance.sqlite 将instance的信息，保存到sqlite，方便观察和查询
-- instance.jsonline 名称和code对应的文件
+- instance.jsonline 从训练目录下的每一个jsonld文件中抽取基本信息加以保存
 - embedding.txt 根据Instance的名称和摘要，生成的embedding值
 - embedding.idx 根据embedding.txt，生成的FAISS索引
+- dev.jsonline 从dev目录下抽取基本信息加以保存
 
 
 其中，instance.jsonline文件中的字段信息包含了从jsonld文件中抽取出的title、abstract、gnd_ids三个字段，已经从文件名称中抽取得到的id字段。即如下四个字段：
@@ -30,7 +31,7 @@ from llms4subjects.api import EMBEDDING_DIM, get_embedding
 from llms4subjects.sqlite import SqliteDb
 
 
-def _parse_jsonld(jsonld_file: Path) -> str | None:
+def _parse_jsonld(jsonld_file: Path) -> dict | None:
     tibkat_id = jsonld_file.stem
 
     # 读取JSON-LD文件
@@ -51,8 +52,7 @@ def _parse_jsonld(jsonld_file: Path) -> str | None:
                 "abstract": abstract,
                 "gnd_codes": gnd_codes,
             }
-            json_record = json.dumps(entry, ensure_ascii=False)
-            return json_record
+            return entry
 
 
 def _gen_jsonline_file(train_dir: str, out_jsonline_file: str) -> None:
@@ -61,7 +61,8 @@ def _gen_jsonline_file(train_dir: str, out_jsonline_file: str) -> None:
     with open(out_jsonline_file, "w", encoding="utf-8") as f:
         train_files = list(Path(train_dir).glob("**/*.jsonld"))
         for jsonld_file in tqdm(train_files):
-            json_record = _parse_jsonld(jsonld_file)
+            entry = _parse_jsonld(jsonld_file)
+            json_record = json.dumps(entry, ensure_ascii=False)
             f.write(json_record + "\n")
 
 
@@ -128,48 +129,60 @@ class InstanceDb(SqliteDb):
         return Instance.from_row(rows[0])
 
 
-def initialize(TIBKAT_json_ld_dir: str, db_home: Path) -> None:
+def initialize(
+    train_jsonld_dir: str, dev_jsonld_dir: str, db_home: Path
+) -> None:
     """初始化，生成embedding等文件"""
     db_home.mkdir(parents=True, exist_ok=True)
     db = InstanceDb(Path(db_home, "instance.sqlite").as_posix())
     jsonline_file = Path(db_home, "instance.jsonline")
 
-    _gen_jsonline_file(TIBKAT_json_ld_dir, jsonline_file.as_posix())
+    # 将开发集文件保存成jsonline的形式
+    _gen_jsonline_file(
+        dev_jsonld_dir, Path(db_home, "dev.jsonline").as_posix()
+    )
 
-    embedding_file = Path(db_home, "embedding.txt").open("w", encoding="utf-8")
+    # 将样本文件保存成jsonline的形式
+    _gen_jsonline_file(train_jsonld_dir, jsonline_file.as_posix())
+
+    embedding_writer = Path(db_home, "embedding.txt").open(
+        "w", encoding="utf-8"
+    )
     # 使用Inner Product (IP) 距离的IndexFlat
     index: faiss.IndexFlatIP = faiss.IndexFlatIP(EMBEDDING_DIM)
 
     embedding_id = 0
-    with jsonline_file.open("r", encoding="utf-8") as f:
-        for line in tqdm(f.readlines()):
-            instance = json.loads(line)
-            tibkat_id, title, abstract, gnd_codes = (
-                instance["id"],
-                instance["title"],
-                instance["abstract"],
-                instance["gnd_codes"],
-            )
+    jsonline_reader = jsonline_file.open("r", encoding="utf-8")
+    for line in tqdm(jsonline_reader.readlines()):
+        instance = json.loads(line)
+        tibkat_id, title, abstract, gnd_codes = (
+            instance["id"],
+            instance["title"],
+            instance["abstract"],
+            instance["gnd_codes"],
+        )
 
         # 读出gnd_id
         start = len("http://d-nb.info/gnd/")
         gnd_codes = [e["@id"][start:] for e in gnd_codes]
+        
         db.insert_instance(embedding_id, tibkat_id, title, abstract, gnd_codes)
         embedding_id += 1
 
         text = f"""title: "{title}"\n abstract: {abstract}"""
         embedding = get_embedding(text)
-        embedding_file.write(",".join([str(e) for e in embedding]))
-        embedding_file.write("\n")
+        embedding_writer.write(",".join([str(e) for e in embedding]))
+        embedding_writer.write("\n")
 
         value = np.array(embedding, dtype=np.float32).reshape(1, EMBEDDING_DIM)
         index.add(value)
     faiss.write_index(index, Path(db_home, "embedding.idx").as_posix())
-    embedding_file.close()
+    embedding_writer.close()
+    jsonline_reader.close()
     db.close()
 
 
-class InstanceEmbeddingQuery:
+class EmbeddingQuery:
     def __init__(self, db_path: Path):
         """读取已经利用FAISS索引的数据文件以及对应的id文件"""
         db_file = Path(db_path, "instance.sqlite").as_posix()
@@ -199,10 +212,12 @@ class InstanceEmbeddingQuery:
 if __name__ == "__main__":
     initialize(
         "./data/shared-task-datasets/TIBKAT/tib-core-subjects/data/train/",
+        "./data/shared-task-datasets/TIBKAT/tib-core-subjects/data/dev/",
         Path("./db/instance/core"),
     )
 
     initialize(
         "./data/shared-task-datasets/TIBKAT/all-subjects/data/train/",
+        "./data/shared-task-datasets/TIBKAT/all-subjects/data/dev/",
         Path("./db/instance/all"),
     )

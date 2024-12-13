@@ -125,7 +125,7 @@ def initialize(gnd_file: str, db_home: Path):
         # 使用json.load()方法将文件内容解析为Python对象
         subjects: dict = json.load(f)
     db = SubjectDb(Path(db_home, "subject.sqlite").as_posix())
-    name_code_file = Path(db_home, "name_code.jsonline ").open(
+    name_code_file = Path(db_home, "name_code.jsonline").open(
         "w", encoding="utf-8"
     )
     embedding_file = Path(db_home, "embedding.txt").open("w", encoding="utf-8")
@@ -182,4 +182,5 @@ def initialize(gnd_file: str, db_home: Path):
 
 if __name__ == "__main__":
     # translate_names()
-    initialize(GND_subjects_core_file, Path("./db/subject/core"))
+    #initialize(GND_subjects_core_file, Path("./db/subject/core"))
+    initialize(GND_subjects_all_file, Path("./db/subject/all"))
