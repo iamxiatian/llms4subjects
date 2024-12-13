@@ -1,0 +1,208 @@
+"""
+TIBKAT实例数据处理，存放在db/instance/core或者db/instance/all目录下，目录下
+存在以下文件：
+
+- instance.sqlite 将instance的信息，保存到sqlite，方便观察和查询
+- instance.jsonline 名称和code对应的文件
+- embedding.txt 根据Instance的名称和摘要，生成的embedding值
+- embedding.idx 根据embedding.txt，生成的FAISS索引
+
+
+其中，instance.jsonline文件中的字段信息包含了从jsonld文件中抽取出的title、abstract、gnd_ids三个字段，已经从文件名称中抽取得到的id字段。即如下四个字段：
+
+- id(str)
+- title(str)
+- abstract(str)
+- gnd_ids(list)
+"""
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from sqlite3 import Row
+
+import faiss
+import numpy as np
+from pyld import jsonld
+from tqdm import tqdm
+
+from llms4subjects.api import EMBEDDING_DIM, get_embedding
+from llms4subjects.sqlite import SqliteDb
+
+
+def _parse_jsonld(jsonld_file: Path) -> str | None:
+    tibkat_id = jsonld_file.stem
+
+    # 读取JSON-LD文件
+    with open(jsonld_file, "r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    # 使用pyld库加载和展开JSON-LD
+    expanded_data = jsonld.expand(data)
+    for e in expanded_data[0]["@graph"]:
+        my_id = e["@id"]
+        if "https://www.tib.eu/de/suchen/id/TIBKAT" in my_id:
+            title = e["http://purl.org/dc/elements/1.1/title"][0]["@value"]
+            abstract = e["http://purl.org/dc/terms/abstract"][0]["@value"]
+            gnd_codes = e["http://purl.org/dc/terms/subject"]
+            entry = {
+                "id": tibkat_id,
+                "title": title,
+                "abstract": abstract,
+                "gnd_codes": gnd_codes,
+            }
+            json_record = json.dumps(entry, ensure_ascii=False)
+            return json_record
+
+
+def _gen_jsonline_file(train_dir: str, out_jsonline_file: str) -> None:
+    """把文件夹train_dir下的所有的jsonld文件，读取出其中的标题和摘要，
+    作为jsonline文件的一行，进行保存，形成一个完整的jsonline文件。"""
+    with open(out_jsonline_file, "w", encoding="utf-8") as f:
+        train_files = list(Path(train_dir).glob("**/*.jsonld"))
+        for jsonld_file in tqdm(train_files):
+            json_record = _parse_jsonld(jsonld_file)
+            f.write(json_record + "\n")
+
+
+@dataclass
+class Instance:
+    embedding_id: int
+    instance_id: str
+    title: str
+    abstract: str
+    gnd_codes: list[str]
+
+    @classmethod
+    def from_row(cls, row: Row) -> "Instance":
+        """从sqlite3.Row对象创建实例"""
+        return cls(
+            embedding_id=row["id"],
+            instance_id=row["instance_id"],
+            title=row["title"],
+            abstract=row["abstract"],
+            gnd_codes=row["gnd_codes"].split(","),
+        )
+
+
+class InstanceDb(SqliteDb):
+    def __init__(self, db_file: str):
+        SqliteDb.__init__(self, db_file)
+        self.create_table("""CREATE TABLE IF NOT EXISTS instance (  
+            id INTEGER PRIMARY KEY,              
+            instance_id TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            abstract TEXT,
+            gnd_codes TEXT NOT NULL
+        );""")
+
+    def insert_instance(
+        self,
+        embedding_id: int,
+        instance_id: str,
+        title: str,
+        abstract: str,
+        gnd_codes: list[str],
+    ) -> int:
+        sql = """INSERT INTO instance (id, instance_id, title, abstract, gnd_codes)   VALUES (?, ?, ?, ?, ?)"""
+
+        value = (
+            embedding_id,
+            instance_id,
+            title,
+            abstract,
+            ",".join(gnd_codes),
+        )
+        return self.insert(sql, value)
+
+    def get_by_instance_ids(self, instance_ids: list[str]) -> list[Instance]:
+        # 加上引号， 拼接成'id1', 'id2'的形式
+        ids_str = ",".join([f"'{e}'" for e in instance_ids])
+        sql = f"""SELECT * from instance WHERE instance_id in ({ids_str})"""
+        return [Instance.from_row(row) for row in self.query(sql=sql)]
+
+    def get_by_embedding_id(self, embedding_id: int) -> Instance:
+        # 加上引号， 拼接成'id1', 'id2'的形式
+        sql = "SELECT * from record WHERE id = ?"
+        rows = self.query(sql=sql, parameters=(embedding_id,))
+        return Instance.from_row(rows[0])
+
+
+def initialize(TIBKAT_json_ld_dir: str, db_home: Path) -> None:
+    """初始化，生成embedding等文件"""
+    db_home.mkdir(parents=True, exist_ok=True)
+    db = InstanceDb(Path(db_home, "instance.sqlite").as_posix())
+    jsonline_file = Path(db_home, "instance.jsonline")
+
+    _gen_jsonline_file(TIBKAT_json_ld_dir, jsonline_file.as_posix())
+
+    embedding_file = Path(db_home, "embedding.txt").open("w", encoding="utf-8")
+    # 使用Inner Product (IP) 距离的IndexFlat
+    index: faiss.IndexFlatIP = faiss.IndexFlatIP(EMBEDDING_DIM)
+
+    embedding_id = 0
+    with jsonline_file.open("r", encoding="utf-8") as f:
+        for line in tqdm(f.readlines()):
+            instance = json.loads(line)
+            tibkat_id, title, abstract, gnd_codes = (
+                instance["id"],
+                instance["title"],
+                instance["abstract"],
+                instance["gnd_codes"],
+            )
+
+        # 读出gnd_id
+        start = len("http://d-nb.info/gnd/")
+        gnd_codes = [e["@id"][start:] for e in gnd_codes]
+        db.insert_instance(embedding_id, tibkat_id, title, abstract, gnd_codes)
+        embedding_id += 1
+
+        text = f"""title: "{title}"\n abstract: {abstract}"""
+        embedding = get_embedding(text)
+        embedding_file.write(",".join([str(e) for e in embedding]))
+        embedding_file.write("\n")
+
+        value = np.array(embedding, dtype=np.float32).reshape(1, EMBEDDING_DIM)
+        index.add(value)
+    faiss.write_index(index, Path(db_home, "embedding.idx").as_posix())
+    embedding_file.close()
+    db.close()
+
+
+class InstanceEmbeddingQuery:
+    def __init__(self, db_path: Path):
+        """读取已经利用FAISS索引的数据文件以及对应的id文件"""
+        db_file = Path(db_path, "instance.sqlite").as_posix()
+        idx_file = Path(db_path, "embedding.idx").as_posix()
+        self.db = InstanceDb(db_file)
+        self.index: faiss.IndexFlatIP = faiss.read_index(idx_file)
+
+    def get_embedding_ids(self, text: str, topk) -> list[int]:
+        """将文本转换为embedding，然后利用faiss查找，将匹配结果的序号返回"""
+        q = np.array(get_embedding(text), dtype=np.float32).reshape(1, -1)
+        _, labels = self.index.search(q, topk)
+        label_ids: list[int] = labels[0].tolist()
+        return label_ids
+
+    def get_instances(self, text: str, topk) -> list[Instance]:
+        """将文本转换为embedding，然后利用faiss查找，将匹配结果的序号返回"""
+        q = np.array(get_embedding(text), dtype=np.float32).reshape(1, -1)
+        _, labels = self.index.search(q, topk)
+        label_ids: list[int] = labels[0].tolist()
+        instances = [self.db.get_by_embedding_id(i) for i in label_ids]
+        return instances
+
+    def close(self) -> None:
+        self.db.close()
+
+
+if __name__ == "__main__":
+    initialize(
+        "./data/shared-task-datasets/TIBKAT/tib-core-subjects/data/train/",
+        Path("./db/instance/core"),
+    )
+
+    initialize(
+        "./data/shared-task-datasets/TIBKAT/all-subjects/data/train/",
+        Path("./db/instance/all"),
+    )
