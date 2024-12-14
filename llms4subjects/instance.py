@@ -58,11 +58,11 @@ def _parse_jsonld(jsonld_file: Path) -> dict | None:
             return entry
 
 
-def _gen_jsonline_file(train_dir: str, out_jsonline_file: str) -> None:
-    """把文件夹train_dir下的所有的jsonld文件，读取出其中的标题和摘要，
+def gen_jsonline_file(instance_dir: str, out_jsonline_file: str) -> None:
+    """把文件夹instance_dir下的所有的jsonld文件，读取出其中的标题和摘要，
     作为jsonline文件的一行，进行保存，形成一个完整的jsonline文件。"""
     with open(out_jsonline_file, "w", encoding="utf-8") as f:
-        train_files = list(Path(train_dir).glob("**/*.jsonld"))
+        train_files = list(Path(instance_dir).glob("**/*.jsonld"))
         for jsonld_file in tqdm(train_files):
             entry = _parse_jsonld(jsonld_file)
             json_record = json.dumps(entry, ensure_ascii=False)
@@ -152,7 +152,13 @@ class InstanceDb(SqliteDb):
 
         return self.insert(
             sql,
-            (seq_id,instance_id,gnd_code,language, doctype,),
+            (
+                seq_id,
+                instance_id,
+                gnd_code,
+                language,
+                doctype,
+            ),
         )
 
     def get_by_instance_ids(self, instance_ids: list[str]) -> list[Instance]:
@@ -166,6 +172,16 @@ class InstanceDb(SqliteDb):
         rows = self.query(sql=sql, parameters=(embedding_id,))
         return Instance.from_row(rows[0])
 
+    @classmethod
+    def open_core(cls) -> "InstanceDb":
+        db = InstanceDb("./db/instance/core/subject.sqlite")
+        return db
+
+    @classmethod
+    def open_all(cls) -> "InstanceDb":
+        db = InstanceDb("./db/instance/all/subject.sqlite")
+        return db
+
 
 def initialize(
     train_jsonld_dir: str, dev_jsonld_dir: str, db_home: Path
@@ -176,12 +192,10 @@ def initialize(
     jsonline_file = Path(db_home, "instance.jsonline")
 
     # 将开发集文件保存成jsonline的形式
-    _gen_jsonline_file(
-        dev_jsonld_dir, Path(db_home, "dev.jsonline").as_posix()
-    )
+    gen_jsonline_file(dev_jsonld_dir, Path(db_home, "dev.jsonline").as_posix())
 
     # 将样本文件保存成jsonline的形式
-    _gen_jsonline_file(train_jsonld_dir, jsonline_file.as_posix())
+    gen_jsonline_file(train_jsonld_dir, jsonline_file.as_posix())
 
     embedding_writer = Path(db_home, "embedding.txt").open(
         "w", encoding="utf-8"
@@ -190,7 +204,7 @@ def initialize(
     index: faiss.IndexFlatIP = faiss.IndexFlatIP(EMBEDDING_DIM)
 
     embedding_id = 0
-    seq_id = 1 # instance和gnd_code的映射关系
+    seq_id = 1  # instance和gnd_code的映射关系
     jsonline_reader = jsonline_file.open("r", encoding="utf-8")
     for line in tqdm(jsonline_reader.readlines()):
         instance = json.loads(line)
@@ -204,9 +218,9 @@ def initialize(
         )
 
         # 读出gnd_codes, 并保证gnd code的开始一定为"gnd:"
-        start = len("http://d-nb.info/gnd/")
-        gnd_codes = [e["@id"][start:] for e in gnd_codes]
-        gnd_codes = [f"gnd:{c}" for c in gnd_codes] 
+        # @id的内容形式：http://d-nb.info/gnd/4028944-8，需要最右侧截取code
+        gnd_codes = [e["@id"].rsplit("/", 1)[-1] for e in gnd_codes]
+        gnd_codes = [f"gnd:{c}" for c in gnd_codes]
 
         db.insert_instance(
             embedding_id,
@@ -218,7 +232,7 @@ def initialize(
             doctype,
         )
         embedding_id += 1
-        
+
         for code in gnd_codes:
             db.insert_mapping(seq_id, tibkat_id, code, language, doctype)
             seq_id += 1
@@ -256,7 +270,6 @@ class EmbeddingQuery:
         q = np.array(get_embedding(text), dtype=np.float32).reshape(1, -1)
         _, labels = self.index.search(q, topk)
         label_ids: list[int] = labels[0].tolist()
-        print(label_ids)
         instances = [self.db.get_by_embedding_id(i) for i in label_ids]
         return instances
 
@@ -264,62 +277,16 @@ class EmbeddingQuery:
         self.db.close()
 
 
-# def initialize2(
-#     train_jsonld_dir: str, dev_jsonld_dir: str, db_home: Path
-# ) -> None:
-#     """初始化，生成embedding等文件"""
-#     db_home.mkdir(parents=True, exist_ok=True)
-#     db = InstanceDb(Path(db_home, "instance.sqlite").as_posix())
-#     jsonline_file = Path(db_home, "instance.jsonline")
-
-#     embedding_id = 0
-#     seq_id = 1 # instance和gnd_code的映射关系
-
-#     jsonline_reader = jsonline_file.open("r", encoding="utf-8")
-#     for line in tqdm(jsonline_reader.readlines()):
-#         instance = json.loads(line)
-#         tibkat_id, title, abstract, gnd_codes, language, doctype = (
-#             instance["id"],
-#             instance["title"],
-#             instance["abstract"],
-#             instance["gnd_codes"],
-#             instance["language"],
-#             instance["doctype"],
-#         )
-
-#         # 读出gnd_id
-#         start = len("http://d-nb.info/gnd/")
-#         gnd_codes = [e["@id"][start:] for e in gnd_codes]
-#         gnd_codes = [f"gnd:{c}" for c in gnd_codes] 
-        
-#         db.insert_instance(
-#             embedding_id,
-#             tibkat_id,
-#             title,
-#             abstract,
-#             gnd_codes,
-#             language,
-#             doctype,
-#         )
-#         embedding_id += 1
-
-#         for code in gnd_codes:
-#             db.insert_mapping(seq_id, tibkat_id, code, language, doctype)
-#             seq_id += 1
-            
-#     jsonline_reader.close()
-#     db.close()
-
-
 if __name__ == "__main__":
-    initialize2(
-        "./data/shared-task-datasets/TIBKAT/tib-core-subjects/data/train/",
-        "./data/shared-task-datasets/TIBKAT/tib-core-subjects/data/dev/",
-        Path("./db/instance/core"),
-    )
+    # initialize(
+    #     "./data/shared-task-datasets/TIBKAT/tib-core-subjects/data/train/",
+    #     "./data/shared-task-datasets/TIBKAT/tib-core-subjects/data/dev/",
+    #     Path("./db/instance/core"),
+    # )
 
-    initialize2(
-        "./data/shared-task-datasets/TIBKAT/all-subjects/data/train/",
-        "./data/shared-task-datasets/TIBKAT/all-subjects/data/dev/",
-        Path("./db/instance/all"),
-    )
+    # initialize(
+    #     "./data/shared-task-datasets/TIBKAT/all-subjects/data/train/",
+    #     "./data/shared-task-datasets/TIBKAT/all-subjects/data/dev/",
+    #     Path("./db/instance/all"),
+    # )
+    print("DONE.")

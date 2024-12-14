@@ -1,8 +1,8 @@
 """
 GND subject信息，存放在db/subjuect/core或者db/subject/all目录下，目录下存在以下文件：
 
-- subject.sqlite 将subject的信息，保存到sqlite，方便观察和查询
-- name_code.jsonline 名称和code对应的文件
+- subject.sqlite 将subject的信息，保存到sqlite，方便观察和查询，同时记录了embedding_id和名称与code的对应关系。
+- name_code.jsonline embedding_id、名称和code对应的文件
 - embedding.txt 根据name-code.jsonline中的name，生成的embedding值
 - embedding.idx 根据embedding.txt，生成的FAISS索引
 """
@@ -69,11 +69,21 @@ class SubjectDb(SqliteDb):
             definition TEXT
         );""")
 
-        self.create_table("""CREATE TABLE IF NOT EXISTS namecode (  
-            id INTEGER PRIMARY KEY,
+        self.create_table("""CREATE TABLE IF NOT EXISTS embedding (  
+            embedding_id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
             code TEXT NOT NULL
         );""")
+
+    @classmethod
+    def open_core(cls) -> "SubjectDb":
+        db = SubjectDb("./db/subject/core/subject.sqlite")
+        return db
+
+    @classmethod
+    def open_all(cls) -> "SubjectDb":
+        db = SubjectDb("./db/subject/all/subject.sqlite")
+        return db
 
     def insert_subject(
         self,
@@ -109,12 +119,21 @@ class SubjectDb(SqliteDb):
 
     def insert_name_code_id(
         self,
-        my_id: int,
+        embedding_id: int,
         name: str,
         code: str,
     ) -> int:
-        sql = "INSERT INTO namecode (id, name, code) VALUES (?, ?, ?)"
-        self.insert(sql, (my_id, name, code))
+        sql = (
+            "INSERT INTO embedding (embedding_id, name, code) VALUES (?, ?, ?)"
+        )
+        self.insert(sql, (embedding_id, name, code))
+
+    def get_by_embedding_id(self, embedding_id: int) -> tuple[str, str]:
+        """根据embedding_id返回name和code二元组，正常二元组应该存在，因此没有判断是否为空"""
+        sql = "SELECT name, code FROM embedding where embedding_id = ?"
+        rows = self.query(sql, (embedding_id,))
+        row = rows[0]
+        return row["name"], row["code"]
 
 
 def translate_names(out_file: str = "name-mapping.jsonline"):
@@ -195,8 +214,11 @@ def initialize(gnd_file: str, db_home: Path):
         for n in alternate_names:
             if n not in existed_names:
                 existed_names.add(n)
-
-                name_code_file.write(f"{n}\n")
+                record = json.dumps(
+                    {"embedding_id": embedding_id, "name": n, "code": code},
+                    ensure_ascii=False,
+                )
+                name_code_file.write(f"{record}\n")
 
                 embedding = get_embedding(n)
                 embedding_file.write(",".join([str(e) for e in embedding]))
@@ -215,7 +237,36 @@ def initialize(gnd_file: str, db_home: Path):
     db.close()
 
 
+class EmbeddingQuery:
+    def __init__(self, db_path: Path):
+        """读取已经利用FAISS索引的数据文件以及对应的id文件"""
+        db_file = Path(db_path, "instance.sqlite").as_posix()
+        idx_file = Path(db_path, "embedding.idx").as_posix()
+        self.db = SubjectDb(db_file)
+        self.index: faiss.IndexFlatIP = faiss.read_index(idx_file)
+
+    def get_embedding_ids(self, text: str, topk) -> list[int]:
+        """将文本转换为embedding，然后利用faiss查找，将匹配结果的序号返回"""
+        q = np.array(get_embedding(text), dtype=np.float32).reshape(1, -1)
+        _, labels = self.index.search(q, topk)
+        label_ids: list[int] = labels[0].tolist()
+        return label_ids
+
+    def get_name_code_list(self, text: str, topk) -> list[tuple[str, str]]:
+        """将文本转换为embedding，然后利用faiss查找，将匹配结果的序号返回"""
+        q = np.array(get_embedding(text), dtype=np.float32).reshape(1, -1)
+        _, labels = self.index.search(q, topk)
+        label_ids: list[int] = labels[0].tolist()
+        print(label_ids)
+        instances = [self.db.get_by_embedding_id(i) for i in label_ids]
+        return instances
+
+    def close(self) -> None:
+        self.db.close()
+
+
 if __name__ == "__main__":
     # translate_names()
     # initialize(GND_subjects_core_file, Path("./db/subject/core"))
-    initialize(GND_subjects_all_file, Path("./db/subject/all"))
+    # initialize(GND_subjects_all_file, Path("./db/subject/all"))
+    print("DONE")
