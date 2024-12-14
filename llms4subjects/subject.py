@@ -116,6 +116,13 @@ class SubjectDb(SqliteDb):
         if not rows:
             print(f"Error: no subject for code: {code}")
         return Subject.from_row(rows[0])
+    
+    def get_name_by_code(self, code: str) -> str:
+        sql = "SELECT name from subject WHERE code = ?"
+        rows = self.query(sql=sql, parameters=(code,))
+        if not rows:
+            print(f"Error: no subject for code: {code}")
+        return rows[0]["name"]
 
     def insert_name_code_id(
         self,
