@@ -3,33 +3,57 @@ from collections import defaultdict
 
 from tqdm import tqdm
 
-from llms4subjects.instance import EmbeddingQuery as InstanceEmbedding
+from llms4subjects.instance import EmbeddingQuery as InstanceEmbeddingQuery
+from llms4subjects.subject import EmbeddingQuery as SubjectEmbeddingQuery
 from llms4subjects.subject import SubjectDb
+
+
 QUERY_TOP_K = 5
 
 
 subject_db = SubjectDb.open_all()
 
-def predict(
-    title: str, abstract: str = "", dataset_type: str = "core"
+
+def by_similar_instances(
+    title: str,
+    abstract: str = "",
+    dataset_type: str = "core",
+    topk: int = QUERY_TOP_K,
 ) -> tuple[list[str], list[str]]:
-    """根据标题和摘要，预测GND Codes和Names"""
+    """根据标题和摘要的Embedding，寻找最相似的样本，将样本对应的codes作为
+    结果返回"""
     input = f"""title:{title}\nabstract:{abstract}"""
-    eq = InstanceEmbedding(f"./db/instance/{dataset_type}")
-    instances = eq.get_instances(input, QUERY_TOP_K)
+    eq = InstanceEmbeddingQuery(f"./db/instance/{dataset_type}")
+    instances = eq.get_instances(input, topk)
     codes: dict[str, float] = defaultdict(float)
     for inst in instances:
         for idx, code in enumerate(inst.gnd_codes):
-            codes[code] = codes[code] + 1.0 + 1.0/(idx+1)
+            codes[code] = codes[code] + 1.0 + 1.0 / (idx + 1)
 
     # 按照出现数量多少排序
     sorted_items: list[tuple[str, float]] = sorted(
         codes.items(), key=lambda item: item[1], reverse=True
     )
-    
+
     # TODO: 考虑出现在title和abstract时，要分别加权
     final_codes = [code for code, _ in sorted_items]
     final_names = [subject_db.get_name_by_code(c) for c in final_codes]
+    return final_codes, final_names
+
+
+def by_similar_subjects(
+    title: str,
+    abstract: str = "",
+    dataset_type: str = "core",
+    topk: int = QUERY_TOP_K,
+) -> tuple[list[str], list[str]]:
+    """根据标题和摘要的Embedding，寻找最相似的主题名称，将其对应的codes作为
+    结果返回"""
+    input = f"""title:{title}\nabstract:{abstract}"""
+    eq = SubjectEmbeddingQuery(f"./db/subject/{dataset_type}")
+    namecodes = eq.get_name_code_list(input, topk)
+    final_codes = [code for _, code in namecodes]
+    final_names = [name for name, _ in namecodes]
     return final_codes, final_names
 
 
@@ -59,7 +83,7 @@ def get_dev_dataset(dataset_type: str = "core") -> list:
                     record["title"],
                     record["abstract"],
                     true_codes,
-                    true_names
+                    true_names,
                 )
             )
     return dataset

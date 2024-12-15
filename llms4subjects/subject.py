@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 from sqlite3 import Row
-
+import textwrap
 import faiss
 import numpy as np
 from tqdm import tqdm
@@ -31,6 +31,7 @@ GND_subjects_core_file = (
 
 @dataclass
 class Subject:
+    embedding_id: int
     code: str
     name: str
     cls_num: str
@@ -44,6 +45,7 @@ class Subject:
     def from_row(cls, row: Row) -> "Subject":
         """从sqlite3.Row对象创建实例"""
         return cls(
+            embedding_id=row["embedding_id"],
             code=row["code"],
             name=row["name"],
             cls_num=row["cls_num"],
@@ -59,6 +61,7 @@ class SubjectDb(SqliteDb):
     def __init__(self, db_file: str):
         SqliteDb.__init__(self, db_file)
         self.create_table("""CREATE TABLE IF NOT EXISTS subject (  
+            embedding_id INTEGER PRIMARY KEY,
             code TEXT NOT NULL UNIQUE,
             name TEXT NOT NULL,
             cls_num TEXT,
@@ -69,11 +72,11 @@ class SubjectDb(SqliteDb):
             definition TEXT
         );""")
 
-        self.create_table("""CREATE TABLE IF NOT EXISTS embedding (  
-            embedding_id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            code TEXT NOT NULL
-        );""")
+        # self.create_table("""CREATE TABLE IF NOT EXISTS embedding (  
+        #     embedding_id INTEGER PRIMARY KEY,
+        #     name TEXT NOT NULL,
+        #     code TEXT NOT NULL
+        # );""")
 
     @classmethod
     def open_core(cls) -> "SubjectDb":
@@ -87,6 +90,7 @@ class SubjectDb(SqliteDb):
 
     def insert_subject(
         self,
+        embedding_id:int,
         code: str,
         name: str,
         cls_num: str,
@@ -97,8 +101,10 @@ class SubjectDb(SqliteDb):
         definition: str,
     ) -> int:
         #  insert subject
-        sql = """INSERT INTO subject (code, name, cls_num, cls_name, alternate_names, related_subjects, source, definition)   VALUES (?, ?, ?, ?, ?, ?, ?, ?)"""
+        sql = """INSERT INTO subject (embedding_id, code, name, cls_num, cls_name, alternate_names, related_subjects, source, definition)  
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"""
         value = (
+            embedding_id,
             code,
             name,
             cls_num,
@@ -124,20 +130,20 @@ class SubjectDb(SqliteDb):
             print(f"Error: no subject for code: {code}")
         return rows[0]["name"]
 
-    def insert_name_code_id(
-        self,
-        embedding_id: int,
-        name: str,
-        code: str,
-    ) -> int:
-        sql = (
-            "INSERT INTO embedding (embedding_id, name, code) VALUES (?, ?, ?)"
-        )
-        self.insert(sql, (embedding_id, name, code))
+    # def insert_name_code_id(
+    #     self,
+    #     embedding_id: int,
+    #     name: str,
+    #     code: str,
+    # ) -> int:
+    #     sql = (
+    #         "INSERT INTO embedding (embedding_id, name, code) VALUES (?, ?, ?)"
+    #     )
+    #     self.insert(sql, (embedding_id, name, code))
 
     def get_by_embedding_id(self, embedding_id: int) -> tuple[str, str]:
         """根据embedding_id返回name和code二元组，正常二元组应该存在，因此没有判断是否为空"""
-        sql = "SELECT name, code FROM embedding where embedding_id = ?"
+        sql = "SELECT name, code FROM subject where embedding_id = ?"
         rows = self.query(sql, (embedding_id,))
         row = rows[0]
         return row["name"], row["code"]
@@ -193,7 +199,6 @@ def initialize(gnd_file: str, db_home: Path):
     # 使用Inner Product (IP) 距离的IndexFlat
     index: faiss.IndexFlatIP = faiss.IndexFlatIP(EMBEDDING_DIM)
 
-    existed_names = set()
     embedding_id = 0
     for entry in tqdm(subjects):
         code, name = entry["Code"], entry["Name"]
@@ -206,6 +211,7 @@ def initialize(gnd_file: str, db_home: Path):
 
         #  insert subject
         db.insert_subject(
+            embedding_id,
             code,
             name,
             cls_num,
@@ -216,28 +222,25 @@ def initialize(gnd_file: str, db_home: Path):
             definition,
         )
 
+        record = json.dumps(
+            {"embedding_id": embedding_id, "name": name, "code": code},
+            ensure_ascii=False,
+        )
+        name_code_file.write(f"{record}\n")
+        
         # insert embedding
-        alternate_names.insert(0, name)
-        for n in alternate_names:
-            if n not in existed_names:
-                existed_names.add(n)
-                record = json.dumps(
-                    {"embedding_id": embedding_id, "name": n, "code": code},
-                    ensure_ascii=False,
-                )
-                name_code_file.write(f"{record}\n")
-
-                embedding = get_embedding(n)
-                embedding_file.write(",".join([str(e) for e in embedding]))
-                embedding_file.write("\n")
-
-                value = np.array(embedding, dtype=np.float32).reshape(
-                    1, EMBEDDING_DIM
-                )
-                index.add(value)
-
-                db.insert_name_code_id(embedding_id, code, n)
-                embedding_id += 1
+        text = textwrap.dedent(f"""Subject:{name}
+                               Related subjects: {"".join(related_subjects)}
+                               Classification Name: {cls_name}""")
+        embedding = get_embedding(text)
+        embedding_file.write(",".join([str(e) for e in embedding]))
+        embedding_file.write("\n")
+        value = np.array(embedding, dtype=np.float32).reshape(
+            1, EMBEDDING_DIM
+        )
+        index.add(value)
+        embedding_id += 1
+        
     faiss.write_index(index, Path(db_home, "embedding.idx").as_posix())
     name_code_file.close()
     embedding_file.close()
@@ -247,7 +250,7 @@ def initialize(gnd_file: str, db_home: Path):
 class EmbeddingQuery:
     def __init__(self, db_path: Path):
         """读取已经利用FAISS索引的数据文件以及对应的id文件"""
-        db_file = Path(db_path, "instance.sqlite").as_posix()
+        db_file = Path(db_path, "subject.sqlite").as_posix()
         idx_file = Path(db_path, "embedding.idx").as_posix()
         self.db = SubjectDb(db_file)
         self.index: faiss.IndexFlatIP = faiss.read_index(idx_file)
@@ -260,13 +263,13 @@ class EmbeddingQuery:
         return label_ids
 
     def get_name_code_list(self, text: str, topk) -> list[tuple[str, str]]:
-        """将文本转换为embedding，然后利用faiss查找，将匹配结果的序号返回"""
+        """将文本转换为embedding，然后利用faiss查找，将匹配结果的
+        (name, code)返回"""
         q = np.array(get_embedding(text), dtype=np.float32).reshape(1, -1)
         _, labels = self.index.search(q, topk)
         label_ids: list[int] = labels[0].tolist()
-        print(label_ids)
-        instances = [self.db.get_by_embedding_id(i) for i in label_ids]
-        return instances
+        namecodes = [self.db.get_by_embedding_id(i) for i in label_ids]
+        return namecodes
 
     def close(self) -> None:
         self.db.close()
@@ -274,6 +277,6 @@ class EmbeddingQuery:
 
 if __name__ == "__main__":
     # translate_names()
-    # initialize(GND_subjects_core_file, Path("./db/subject/core"))
-    # initialize(GND_subjects_all_file, Path("./db/subject/all"))
+    initialize(GND_subjects_core_file, Path("./db/subject/core"))
+    initialize(GND_subjects_all_file, Path("./db/subject/all"))
     print("DONE")
