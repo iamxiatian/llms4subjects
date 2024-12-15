@@ -56,17 +56,17 @@ class AliasDb(SqliteDb):
         self,
         embedding_id: int,
         name: str,
-        codes: str,
+        codes: list[str],
     ) -> int:
         sql = "INSERT INTO alias (embedding_id, name, codes) VALUES (?, ?, ?)"
-        self.insert(sql, (embedding_id, name, codes))
+        self.insert(sql, (embedding_id, name, ",".join(codes)))
 
     def get_codes_by_name(self, name: str) -> list[str]:
         sql = "SELECT codes from alias WHERE name = ?"
         rows = self.query(sql=sql, parameters=(name,))
         codes = []
         for row in rows:
-            codes.extend(row["code"].split(","))
+            codes.extend(row["codes"].split(","))
         return codes
 
     def get_by_embedding_id(self, embedding_id: int) -> Alias:
