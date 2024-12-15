@@ -72,7 +72,7 @@ class SubjectDb(SqliteDb):
             definition TEXT
         );""")
 
-        # self.create_table("""CREATE TABLE IF NOT EXISTS embedding (  
+        # self.create_table("""CREATE TABLE IF NOT EXISTS embedding (
         #     embedding_id INTEGER PRIMARY KEY,
         #     name TEXT NOT NULL,
         #     code TEXT NOT NULL
@@ -90,7 +90,7 @@ class SubjectDb(SqliteDb):
 
     def insert_subject(
         self,
-        embedding_id:int,
+        embedding_id: int,
         code: str,
         name: str,
         cls_num: str,
@@ -122,13 +122,21 @@ class SubjectDb(SqliteDb):
         if not rows:
             print(f"Error: no subject for code: {code}")
         return Subject.from_row(rows[0])
-    
+
     def get_name_by_code(self, code: str) -> str:
         sql = "SELECT name from subject WHERE code = ?"
         rows = self.query(sql=sql, parameters=(code,))
         if not rows:
             print(f"Error: no subject for code: {code}")
         return rows[0]["name"]
+    
+    def get_code_by_name(self, name: str) -> str|None:
+        sql = "SELECT code from subject WHERE name = ?"
+        rows = self.query(sql=sql, parameters=(name,))
+        if not rows:
+            return None
+        else:
+            return rows[0]["code"]
 
     # def insert_name_code_id(
     #     self,
@@ -227,7 +235,7 @@ def initialize(gnd_file: str, db_home: Path):
             ensure_ascii=False,
         )
         name_code_file.write(f"{record}\n")
-        
+
         # insert embedding
         text = textwrap.dedent(f"""Subject:{name}
                                Related subjects: {"".join(related_subjects)}
@@ -235,12 +243,10 @@ def initialize(gnd_file: str, db_home: Path):
         embedding = get_embedding(text)
         embedding_file.write(",".join([str(e) for e in embedding]))
         embedding_file.write("\n")
-        value = np.array(embedding, dtype=np.float32).reshape(
-            1, EMBEDDING_DIM
-        )
+        value = np.array(embedding, dtype=np.float32).reshape(1, EMBEDDING_DIM)
         index.add(value)
         embedding_id += 1
-        
+
     faiss.write_index(index, Path(db_home, "embedding.idx").as_posix())
     name_code_file.close()
     embedding_file.close()
@@ -262,7 +268,16 @@ class EmbeddingQuery:
         label_ids: list[int] = labels[0].tolist()
         return label_ids
 
-    def get_name_code_list(self, text: str, topk) -> list[tuple[str, str]]:
+    def get_namecodes_by_name(
+        self, subject_name: str, topk: int
+    ) -> list[tuple[str, str]]:
+        """获取和subject_name相似的条目"""
+        text = textwrap.dedent(f"""Subject:{subject_name}
+                               Related subjects: 
+                               Classification Name: """)
+        return self.get_namescode_by_text(text, topk)
+
+    def get_namescode_by_text(self, text: str, topk) -> list[tuple[str, str]]:
         """将文本转换为embedding，然后利用faiss查找，将匹配结果的
         (name, code)返回"""
         q = np.array(get_embedding(text), dtype=np.float32).reshape(1, -1)

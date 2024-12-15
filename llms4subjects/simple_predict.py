@@ -3,7 +3,7 @@ from collections import defaultdict
 
 from tqdm import tqdm
 
-from llms4subjects.instance import EmbeddingQuery as InstanceEmbeddingQuery
+from llms4subjects.instance import EmbeddingQuery as EmbeddingQuery
 from llms4subjects.subject import EmbeddingQuery as SubjectEmbeddingQuery
 from llms4subjects.subject import SubjectDb
 
@@ -23,7 +23,7 @@ def by_similar_instances(
     """根据标题和摘要的Embedding，寻找最相似的样本，将样本对应的codes作为
     结果返回"""
     input = f"""title:{title}\nabstract:{abstract}"""
-    eq = InstanceEmbeddingQuery(f"./db/instance/{dataset_type}")
+    eq = EmbeddingQuery(f"./db/instance/{dataset_type}")
     instances = eq.get_instances(input, topk)
     codes: dict[str, float] = defaultdict(float)
     for inst in instances:
@@ -51,7 +51,7 @@ def by_similar_subjects(
     结果返回"""
     input = f"""title:{title}\nabstract:{abstract}"""
     eq = SubjectEmbeddingQuery(f"./db/subject/{dataset_type}")
-    namecodes = eq.get_name_code_list(input, topk)
+    namecodes = eq.get_namescode_by_text(input, topk)
     final_codes = [code for _, code in namecodes]
     final_names = [name for name, _ in namecodes]
     return final_codes, final_names
