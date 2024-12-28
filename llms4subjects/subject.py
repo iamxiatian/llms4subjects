@@ -8,10 +8,11 @@ GND subject信息，存放在db/subjuect/core或者db/subject/all目录下，目
 """
 
 import json
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from sqlite3 import Row
-import textwrap
+
 import faiss
 import numpy as np
 from tqdm import tqdm
@@ -254,11 +255,10 @@ def initialize(gnd_file: str, db_home: Path):
 
 
 class EmbeddingQuery:
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, db:SubjectDb):
         """读取已经利用FAISS索引的数据文件以及对应的id文件"""
-        db_file = Path(db_path, "subject.sqlite").as_posix()
         idx_file = Path(db_path, "embedding.idx").as_posix()
-        self.db = SubjectDb(db_file)
+        self.db = db
         self.index: faiss.IndexFlatIP = faiss.read_index(idx_file)
 
     def get_embedding_ids(self, text: str, topk) -> list[int]:
@@ -276,6 +276,20 @@ class EmbeddingQuery:
                                Related subjects: 
                                Classification Name: """)
         return self.get_namescode_by_text(text, topk)
+    
+    def get_code_by_name(
+        self, subject_name: str
+    ) -> str:
+        """获取和subject_name相似的条目"""
+        code = self.db.get_code_by_name(subject_name)
+        if code is not None:
+            return code
+
+        text = textwrap.dedent(f"""Subject:{subject_name}
+                               Related subjects: 
+                               Classification Name: """)
+        namecodes = self.get_namescode_by_text(text, 1)
+        return namecodes[0][1]
 
     def get_namescode_by_text(self, text: str, topk) -> list[tuple[str, str]]:
         """将文本转换为embedding，然后利用faiss查找，将匹配结果的
@@ -289,6 +303,10 @@ class EmbeddingQuery:
     def close(self) -> None:
         self.db.close()
 
+
+subject_db_core = SubjectDb.open_core()
+subject_db_all = SubjectDb.open_all()
+subject_eq = EmbeddingQuery(Path("./db/subject/all"), subject_db_all)
 
 if __name__ == "__main__":
     # translate_names()

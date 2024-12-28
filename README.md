@@ -67,3 +67,10 @@
 Subjects: Telekommunikation und Verkehr; Städtebau; Stadt;Stadtverkehr
 Classification Name: Telekommunikation und Verkehr
 ```
+
+### ColBERT方式 
+
+Jina ColBERT v2
+
+
+

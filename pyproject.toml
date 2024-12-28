@@ -24,6 +24,7 @@ torchaudio = {version = "^2.5.0+cu118", source = "pytorch-gpu"}
 faiss-gpu = "^1.7.2"
 pyld = "^2.0.4"
 numpy = "^1.26.4"
+openai = "^1.58.1"
 
 
 [tool.poetry.group.dev.dependencies]

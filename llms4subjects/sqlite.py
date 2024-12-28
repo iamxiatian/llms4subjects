@@ -39,6 +39,11 @@ class SqliteDb:
         cursor = self.conn.cursor()
         cursor.execute(sql, parameters)
         self.conn.commit()
+        
+    def tatal(self, table_name:str) -> int:
+        sql = f"SELECT COUNT(*) FROM {table_name}"
+        row = self.query(sql)[0]
+        return row[0]
 
     def close(self) -> None:
         self.conn.close()
