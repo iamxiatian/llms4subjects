@@ -1,5 +1,5 @@
 import requests
-
+import json
 
 def post(url: str, data: dict) -> any:
     headers = {
@@ -75,6 +75,7 @@ class LLM:
         )
 
         return response.text
+    
 
     def chat(
         self,
@@ -106,6 +107,43 @@ class LLM:
                     "content": user_prompt,
                 },
             ],
+            "temperature": temperature,
+            # "top_p": top_p,
+            "n": n_choices,
+            "best_of": n_choices,
+            "use_beam_search": use_beam_search,
+            "repetition_penalty": repetition_penalty,
+            "max_tokens": max_tokens,
+            "skip_special_tokens": skip_special_tokens,
+        }
+
+        headers = {"Content-Type": "application/json"}
+        response = requests.request(
+            "POST", self.chat_url, headers=headers, json=payload
+        )
+        return response.text
+
+
+    def chat_messages(
+        self,
+        messages: list[dict[str, str]],
+        temperature: float = 0,
+        n_choices: int = 1,
+        top_p: float = 0.8,
+        repetition_penalty: float = 1.05,
+        max_tokens: int = 512,
+        skip_special_tokens: bool = True,
+    )->str:
+        """以对话方式与LLM进行交互，传入一组数据
+
+        Args:
+            n_choices (int): number of return candidates.
+                Defaults to 1.
+        """
+        use_beam_search = n_choices > 1
+        payload = {
+            "model": self.model,
+            "messages": messages,
             "temperature": temperature,
             # "top_p": top_p,
             "n": n_choices,

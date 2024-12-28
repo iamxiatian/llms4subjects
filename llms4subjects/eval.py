@@ -4,63 +4,9 @@ from pathlib import Path
 from tqdm import tqdm
 
 from llms4subjects.instance import EmbeddingQuery as EmbeddingQuery
-from llms4subjects.subject import EmbeddingQuery as SubjectEmbeddingQuery
-from llms4subjects.subject import SubjectDb
-
-
-QUERY_TOP_K = 5
-
-
-subject_db = SubjectDb.open_all()
-
-
-def by_similar_instances(
-    title: str,
-    abstract: str = "",
-    dataset_type: str = "core",
-    topk: int = QUERY_TOP_K,
-) -> tuple[list[str], list[str]]:
-    """根据标题和摘要的Embedding，寻找最相似的样本，将样本对应的codes作为
-    结果返回"""
-    input = f"""title:{title}\nabstract:{abstract}"""
-    eq = EmbeddingQuery(f"./db/instance/{dataset_type}")
-    instances = eq.get_instances(input, topk)
-    codes: dict[str, float] = defaultdict(float)
-    for inst in instances:
-        for idx, code in enumerate(inst.gnd_codes):
-            codes[code] = codes[code] + 1.0 + 1.0 / (idx + 1)
-
-            # 考虑出现在title和abstract时，分别加权
-            name = subject_db.get_name_by_code(code)
-            if name in title:
-                codes[code] = codes[code] + 2
-            if name in abstract:
-                codes[code] = codes[code] + 1
-
-    # 按照出现数量多少排序
-    sorted_items: list[tuple[str, float]] = sorted(
-        codes.items(), key=lambda item: item[1], reverse=True
-    )
-
-    final_codes = [code for code, _ in sorted_items]
-    final_names = [subject_db.get_name_by_code(c) for c in final_codes]
-    return final_codes, final_names
-
-
-def by_similar_subjects(
-    title: str,
-    abstract: str = "",
-    dataset_type: str = "core",
-    topk: int = QUERY_TOP_K,
-) -> tuple[list[str], list[str]]:
-    """根据标题和摘要的Embedding，寻找最相似的主题名称，将其对应的codes作为
-    结果返回"""
-    input = f"""title:{title}\nabstract:{abstract}"""
-    eq = SubjectEmbeddingQuery(f"./db/subject/{dataset_type}")
-    namecodes = eq.get_namescode_by_text(input, topk)
-    final_codes = [code for _, code in namecodes]
-    final_names = [name for name, _ in namecodes]
-    return final_codes, final_names
+from llms4subjects.subject import subject_db_all as subject_db
+from llms4subjects.predict import Predictor
+from llms4subjects.predict.predict_simple import PredictByInstance
 
 
 def get_dev_dataset(dataset_type: str = "core") -> list[dict]:
@@ -104,6 +50,7 @@ def p_at_k(pred_codes: list[str], true_codes: list[str], k: int) -> float:
 
     return above * 1.0 / k
 
+
 def AP(pred_codes: list[str], true_codes: list[str], k: int) -> float:
     """计算AP"""
     ap = 0.0
@@ -111,22 +58,31 @@ def AP(pred_codes: list[str], true_codes: list[str], k: int) -> float:
     for i, code in enumerate(pred_codes, start=1):
         if code in true_codes:
             n_matched += 1
-            ap += n_matched/i
+            ap += n_matched / i
     ap = ap / len(true_codes)
     return ap
 
-def eval(dataset_type: str = "core") -> defaultdict[str, float]:
-    topk = 5
+
+def eval(
+    dataset_type: str,
+    predictor: Predictor,
+    middle_file: str,
+    result_file: str,
+) -> defaultdict[str, float]:
+    """对指定的dataset_type(all|core)，按照predictor进行预测
+    Args:
+    - dataset_type: all|core
+    - predictor： 预测方式
+    - middle_file: 保存每个测试样本的预测结果，为一个jsonline文件
+    - result_file: 最终的预测指标结果，是一个文本文件
+    """
     metrics: dict[str, float] = defaultdict(float)
     records = get_dev_dataset(dataset_type)
-    eval_file = f"./db/eval/{dataset_type}/by_similar_records_{topk}.jsonline"
-    Path(eval_file).parent.mkdir(parents=True, exist_ok=True)
-    with open(eval_file, "w", encoding="utf-8") as f:
+    Path(middle_file).parent.mkdir(parents=True, exist_ok=True)
+    with open(middle_file, "w", encoding="utf-8") as f:
         for record in tqdm(records):
             true_codes = record["true_codes"]
-            pred_codes, _ = by_similar_instances(
-                record["title"], record["abstract"], "all", 5
-            )
+            pred_codes, _ = predictor(record["title"], record["abstract"])
             entry = {
                 "id": record["id"],
                 "title": record["title"],
@@ -142,9 +98,21 @@ def eval(dataset_type: str = "core") -> defaultdict[str, float]:
     for name in metrics.keys():
         metrics[name] = metrics[name] / len(records)
 
+    lines = [f"{k}\t{v}" for k, v in metrics]
+    Path(result_file).write_text("\n".join(lines), encoding="Utf-8")
+
     return metrics
 
 
-if __name__ == "__main__":
-    metrics = eval("all")
+def main():
+    dataset_type = "all"
+    middle_file = f"./db/eval/{dataset_type}/by_instance_5.jsonline"
+    result_file = f"./db/eval/{dataset_type}/by_instance_5.txt"
+
+    predictor = PredictByInstance(dataset_type=dataset_type)
+    metrics = eval(dataset_type, predictor, middle_file, result_file)
     print(metrics)
+
+
+if __name__ == "__main__":
+    main()

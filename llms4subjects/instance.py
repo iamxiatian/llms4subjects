@@ -170,16 +170,21 @@ class InstanceDb(SqliteDb):
     def get_by_embedding_id(self, embedding_id: int) -> Instance:
         sql = "SELECT * from instance WHERE embedding_id = ?"
         rows = self.query(sql=sql, parameters=(embedding_id,))
+        if not rows:
+            total = self.tatal("instance")
+            message = f"no embedding_id {embedding_id} in {self.db_file}, \
+                total records: {total}"
+            raise Exception(message)
         return Instance.from_row(rows[0])
 
     @classmethod
     def open_core(cls) -> "InstanceDb":
-        db = InstanceDb("./db/instance/core/subject.sqlite")
+        db = InstanceDb("./db/instance/core/instance.sqlite")
         return db
 
     @classmethod
     def open_all(cls) -> "InstanceDb":
-        db = InstanceDb("./db/instance/all/subject.sqlite")
+        db = InstanceDb("./db/instance/all/instance.sqlite")
         return db
 
 
@@ -251,11 +256,10 @@ def initialize(
 
 
 class EmbeddingQuery:
-    def __init__(self, db_path: Path):
+    def __init__(self, db_path: Path, db: InstanceDb):
         """读取已经利用FAISS索引的数据文件以及对应的id文件"""
-        db_file = Path(db_path, "instance.sqlite").as_posix()
         idx_file = Path(db_path, "embedding.idx").as_posix()
-        self.db = InstanceDb(db_file)
+        self.db = db
         self.index: faiss.IndexFlatIP = faiss.read_index(idx_file)
 
     def get_embedding_ids(self, text: str, topk) -> list[int]:
@@ -275,6 +279,26 @@ class EmbeddingQuery:
 
     def close(self) -> None:
         self.db.close()
+
+
+instance_db_all = InstanceDb.open_all()
+instance_db_core = InstanceDb.open_core()
+instance_eq_all = EmbeddingQuery(Path("./db/instance/all"), instance_db_all)
+instance_eq_core = EmbeddingQuery(Path("./db/instance/core"), instance_db_core)
+
+
+def get_instance_db(dataset_type: str) -> InstanceDb:
+    if dataset_type == "core":
+        return instance_db_core
+    else:
+        return instance_db_all
+
+
+def get_instance_eq(dataset_type: str) -> EmbeddingQuery:
+    if dataset_type == "core":
+        return instance_eq_core
+    else:
+        return instance_eq_all
 
 
 if __name__ == "__main__":
