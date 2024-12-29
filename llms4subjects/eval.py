@@ -7,6 +7,7 @@ from llms4subjects.instance import EmbeddingQuery as EmbeddingQuery
 from llms4subjects.subject import subject_db_all as subject_db
 from llms4subjects.predict import Predictor
 from llms4subjects.predict.predict_simple import PredictByInstance
+from llms4subjects.predict.predict_llm import PredictByExamples
 
 
 def get_dev_dataset(dataset_type: str = "core") -> list[dict]:
@@ -98,13 +99,13 @@ def eval(
     for name in metrics.keys():
         metrics[name] = metrics[name] / len(records)
 
-    lines = [f"{k}\t{v}" for k, v in metrics]
+    lines = [f"{k}\t{v}" for k, v in metrics.items()]
     Path(result_file).write_text("\n".join(lines), encoding="Utf-8")
 
     return metrics
 
 
-def main():
+def eval_by_instance():
     dataset_type = "all"
     middle_file = f"./db/eval/{dataset_type}/by_instance_5.jsonline"
     result_file = f"./db/eval/{dataset_type}/by_instance_5.txt"
@@ -113,6 +114,14 @@ def main():
     metrics = eval(dataset_type, predictor, middle_file, result_file)
     print(metrics)
 
+def eval_by_llm():
+    dataset_type = "all"
+    middle_file = f"./db/eval/{dataset_type}/by_llm.jsonline"
+    result_file = f"./db/eval/{dataset_type}/by_llm.txt"
 
+    predictor = PredictByExamples(dataset_type=dataset_type)
+    metrics = eval(dataset_type, predictor, middle_file, result_file)
+    print(metrics)
+    
 if __name__ == "__main__":
-    main()
+    eval_by_llm()

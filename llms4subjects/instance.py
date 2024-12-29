@@ -294,7 +294,7 @@ def get_instance_db(dataset_type: str) -> InstanceDb:
         return instance_db_all
 
 
-def get_instance_eq(dataset_type: str) -> EmbeddingQuery:
+def get_embedding_query(dataset_type: str) -> EmbeddingQuery:
     if dataset_type == "core":
         return instance_eq_core
     else:

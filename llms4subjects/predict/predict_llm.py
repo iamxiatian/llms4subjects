@@ -1,6 +1,6 @@
 import json
 
-from llms4subjects.instance import EmbeddingQuery as EmbeddingQuery
+from llms4subjects.instance import get_embedding_query
 from llms4subjects.llm import LLM
 from llms4subjects.subject import subject_eq, subject_db_all as subject_db
 from llms4subjects.util import rm_leading_blanks
@@ -15,7 +15,7 @@ def _find_examples(
     title: str, abstract: str, dataset_type: str = "all", topk=5
 ) -> str:
     text = f"""title:{title}\nabstract:{abstract}"""
-    eq = EmbeddingQuery(f"./db/instance/{dataset_type}")
+    eq = get_embedding_query(dataset_type)
     instances = eq.get_instances(text, topk)
     examples = []
     for i, inst in enumerate(instances, start=1):
@@ -67,17 +67,38 @@ class PredictByExamples(Predictor):
     def predict(self, title, abstract) -> tuple[list[str], list[str]]:
         prompt = make_prompt(title, abstract, self.dataset_type, self.topk)
 
-        messages = [
-            {"role": "user", "content": prompt},
-        ]
-        response_text = self.client.chat_messages(messages)
+        # messages = [
+        #     {"role": "user", "content": prompt},
+        # ]
+        response_text = self.client.complete(prompt)
         record = json.loads(response_text)
-        items = record["choices"][0]
+        assistant_text = record["choices"][0]["text"]
+        
+        
+        #主题所在的行，有可能因为额外输出，需要抽取
+        subject_line = None 
+        for line in assistant_text.split("\n"):
+            line = line.strip()
+            if line[0] == "-":
+                line = line[1:].strip()
+            if len(line)> 10 and line[0] == "[" and line[-1] =="]":
+                subject_line = line
+                break
+        
+        if subject_line is None:
+            subject_line = assistant_text
+        
         names, codes = [], []
-        for item in items:
-            # 模型预测的名称不一定正确，需要反向查找subject
-            code = subject_eq.get_code_by_name(item)
-            name = subject_db.get_name_by_code(code)
-            names.append(name)
-            codes.append(code)
+        
+        try:
+            items = json.loads(subject_line)
+            
+            for item in items:
+                # 模型预测的名称不一定正确，需要反向查找subject
+                code = subject_eq.get_code_by_name(item)
+                name = subject_db.get_name_by_code(code)
+                names.append(name)
+                codes.append(code)
+        except Exception as e:
+            print(f"LLM_ERROR for title: {title}\n{e}\n{response_text}")
         return codes, names

@@ -1,6 +1,6 @@
 from collections import defaultdict
 
-from llms4subjects.instance import get_instance_eq
+from llms4subjects.instance import get_embedding_query
 from llms4subjects.subject import subject_db_all as subject_db
 from llms4subjects.subject import subject_eq
 
@@ -27,7 +27,7 @@ class PredictByInstance(Predictor):
             (codes，names)二元组，格式：tuple[list[str], list[str]]
         """
         input = f"""title:{title}\nabstract:{abstract}"""
-        eq = get_instance_eq(self.dataset_type)
+        eq = get_embedding_query(self.dataset_type)
         instances = eq.get_instances(input, self.topk)
         codes: dict[str, float] = defaultdict(float)
         for inst in instances:
