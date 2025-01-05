@@ -25,6 +25,8 @@ faiss-gpu = "^1.7.2"
 pyld = "^2.0.4"
 numpy = "^1.26.4"
 openai = "^1.58.1"
+einops = "^0.8.0"
+ragatouille = "^0.0.8.post4"
 
 
 [tool.poetry.group.dev.dependencies]

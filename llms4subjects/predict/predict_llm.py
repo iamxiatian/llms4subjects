@@ -79,7 +79,7 @@ class PredictByExamples(Predictor):
         subject_line = None 
         for line in assistant_text.split("\n"):
             line = line.strip()
-            if line[0] == "-":
+            if len(line)>10 and line[0] == "-":
                 line = line[1:].strip()
             if len(line)> 10 and line[0] == "[" and line[-1] =="]":
                 subject_line = line

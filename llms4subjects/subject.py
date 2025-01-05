@@ -139,6 +139,9 @@ class SubjectDb(SqliteDb):
         else:
             return rows[0]["code"]
 
+    def num(self) -> int:
+        return self.total("subject")
+    
     # def insert_name_code_id(
     #     self,
     #     embedding_id: int,

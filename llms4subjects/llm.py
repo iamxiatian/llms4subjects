@@ -45,7 +45,7 @@ class LLM:
         temperature: float = 0,
         n_choices: int = 1,
         use_beam_search=False,
-        max_tokens: int = 256,
+        max_tokens: int = 5000,
         skip_special_tokens: bool = True,
     ) -> str:
         """根据输入的提示，继续续写内容。
@@ -85,7 +85,7 @@ class LLM:
         n_choices: int = 1,
         top_p: float = 0.8,
         repetition_penalty: float = 1.05,
-        max_tokens: int = 512,
+        max_tokens: int = 5000,
         skip_special_tokens: bool = True,
     ) -> str:
         """以对话方式与LLM进行交互。

@@ -18,6 +18,7 @@ TIBKAT实例数据处理，存放在db/instance/core或者db/instance/all目录�
 """
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from sqlite3 import Row
@@ -29,6 +30,9 @@ from tqdm import tqdm
 
 from llms4subjects.api import EMBEDDING_DIM, get_embedding
 from llms4subjects.sqlite import SqliteDb
+from llms4subjects.prompt import to_alpaca_entry
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_jsonld(jsonld_file: Path) -> dict | None:
@@ -177,6 +181,30 @@ class InstanceDb(SqliteDb):
             raise Exception(message)
         return Instance.from_row(rows[0])
 
+    def num(self) -> int:
+        return self.total("instance")
+
+    def to_alpaca(self, json_file: str):
+        """将instance转换为alpaca格式的LLM训练文件"""
+        from llms4subjects.subject import subject_db_all
+
+        sql = "SELECT * from instance"
+        rows = self.query(sql=sql, parameters=())
+        entries = []
+        for row in tqdm(rows):
+            title, abstract = row["title"], row["abstract"]
+            codes = row["gnd_codes"].split(",")
+            subjects = [subject_db_all.get_name_by_code(c) for c in codes]
+
+            entry = to_alpaca_entry(title, abstract, subjects)
+            entries.append(entry)
+
+        # 写入文件
+        with open(json_file, "w", encoding="utf-8") as f:
+            json.dump(entries, f, ensure_ascii=False, indent=2)
+        n = len(entries)
+        logger.info(f"convert {n} instance to alpaca format.")
+
     @classmethod
     def open_core(cls) -> "InstanceDb":
         db = InstanceDb("./db/instance/core/instance.sqlite")
@@ -185,6 +213,11 @@ class InstanceDb(SqliteDb):
     @classmethod
     def open_all(cls) -> "InstanceDb":
         db = InstanceDb("./db/instance/all/instance.sqlite")
+        return db
+
+    @classmethod
+    def open_merged(cls) -> "InstanceDb":
+        db = InstanceDb("./db/instance/merged/instance.sqlite")
         return db
 
 
@@ -283,22 +316,79 @@ class EmbeddingQuery:
 
 instance_db_all = InstanceDb.open_all()
 instance_db_core = InstanceDb.open_core()
+instance_db_merged = InstanceDb.open_merged()
+
 instance_eq_all = EmbeddingQuery(Path("./db/instance/all"), instance_db_all)
 instance_eq_core = EmbeddingQuery(Path("./db/instance/core"), instance_db_core)
+instance_eq_merged = EmbeddingQuery(
+    Path("./db/instance/merged"), instance_db_merged
+)
 
 
 def get_instance_db(dataset_type: str) -> InstanceDb:
     if dataset_type == "core":
         return instance_db_core
-    else:
+    elif dataset_type == "all":
         return instance_db_all
+    else:
+        return instance_db_merged
 
 
 def get_embedding_query(dataset_type: str) -> EmbeddingQuery:
     if dataset_type == "core":
         return instance_eq_core
-    else:
+    elif dataset_type == "all":
         return instance_eq_all
+    else:
+        return instance_eq_merged
+
+
+def load_jsonline_file(jsonline_file: str) -> list[dict]:
+    from llms4subjects.subject import subject_db_all as subject_db
+
+    dataset = []
+    with open(jsonline_file, "r", encoding="utf-8") as dev_f:
+        for line in tqdm(dev_f.readlines()):
+            record = json.loads(line)
+            true_codes = [
+                c["@id"].rsplit("/", 1)[-1] for c in record["gnd_codes"]
+            ]
+            true_codes = [f"gnd:{c}" for c in true_codes]
+            true_names = [subject_db.get_name_by_code(c) for c in true_codes]
+            dataset.append(
+                {
+                    "id": record["id"],
+                    "title": record["title"],
+                    "abstract": record["abstract"],
+                    "gnd_codes": true_codes,
+                    "gnd_names": true_names,
+                }
+            )
+    return dataset
+
+
+def merge_all_to_alpaca(out_json_file:str):
+    """把merged下所有的文件，都转成alpaca"""
+    home = Path("./db/instance/merged")
+    jsonline_file = Path(home, "instance.jsonline")
+    dev_file = Path(home, "dev.jsonline")
+
+    ds = load_jsonline_file(jsonline_file.as_posix())
+    ds2 = load_jsonline_file(dev_file.as_posix())
+    ds.extend(ds2)
+    entries = []
+    for row in tqdm(ds):
+        title, abstract = row["title"], row["abstract"]
+        subjects = row["gnd_names"]
+
+        entry = to_alpaca_entry(title, abstract, subjects)
+        entries.append(entry)
+
+    # 写入文件
+    with open(out_json_file, "w", encoding="utf-8") as f:
+        json.dump(entries, f, ensure_ascii=False, indent=2)
+    n = len(entries)
+    logger.info(f"convert {n} instance to alpaca format.")
 
 
 if __name__ == "__main__":
@@ -309,8 +399,8 @@ if __name__ == "__main__":
     # )
 
     # initialize(
-    #     "./data/shared-task-datasets/TIBKAT/all-subjects/data/train/",
-    #     "./data/shared-task-datasets/TIBKAT/all-subjects/data/dev/",
-    #     Path("./db/instance/all"),
+    #     "./data/shared-task-datasets/TIBKAT/merged-subjects/data/train/",
+    #     "./data/shared-task-datasets/TIBKAT/merged-subjects/data/dev/",
+    #     Path("./db/instance/merged"),
     # )
     print("DONE.")

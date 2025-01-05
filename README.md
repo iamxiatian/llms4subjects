@@ -72,5 +72,19 @@ Classification Name: Telekommunikation und Verkehr
 
 Jina ColBERT v2
 
+下载模型：
 
+```shell
+export HF_ENDPOINT=https://hf-mirror.com
+huggingface-cli download --local-dir-use-symlinks False --resume-download jinaai/jina-colbert-v2 --local-dir jina-colbert-v2
+```
 
+需要安装einops、flash_attn和ragatouille，flasth_attn直接利用poetry安装有问题，
+因此poetry install完毕后，再通过"pip install -U flash_attn"安装。
+
+## 训练与推理
+
+```shell
+export CUDA_VISIBLE_DEVICES=4
+lmdeploy serve api_server /root/xiatian/LLaMA-Factory/models/llama3_tibkat_lora_sft --server-port 23333
+```

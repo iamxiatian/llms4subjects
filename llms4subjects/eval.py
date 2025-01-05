@@ -8,6 +8,7 @@ from llms4subjects.subject import subject_db_all as subject_db
 from llms4subjects.predict import Predictor
 from llms4subjects.predict.predict_simple import PredictByInstance
 from llms4subjects.predict.predict_llm import PredictByExamples
+from llms4subjects.predict.predict_sft import PredictBySftLlama
 
 
 def get_dev_dataset(dataset_type: str = "core") -> list[dict]:
@@ -100,7 +101,7 @@ def eval(
         metrics[name] = metrics[name] / len(records)
 
     lines = [f"{k}\t{v}" for k, v in metrics.items()]
-    Path(result_file).write_text("\n".join(lines), encoding="Utf-8")
+    Path(result_file).write_text("\n".join(lines), encoding="utf-8")
 
     return metrics
 
@@ -123,5 +124,15 @@ def eval_by_llm():
     metrics = eval(dataset_type, predictor, middle_file, result_file)
     print(metrics)
     
+def eval_by_sft():
+    dataset_type = "merged"
+    middle_file = f"./db/eval/{dataset_type}/by_llm.jsonline"
+    result_file = f"./db/eval/{dataset_type}/by_llm.txt"
+
+    model_path = "/root/xiatian/LLaMA-Factory/models/llama3_tibkat_lora_sft"
+    predictor = PredictBySftLlama(model_path=model_path)
+    metrics = eval(dataset_type, predictor, middle_file, result_file)
+    print(metrics)
+    
 if __name__ == "__main__":
-    eval_by_llm()
+    eval_by_sft()

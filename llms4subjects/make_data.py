@@ -1,96 +1,90 @@
-"""把图书、论文等文献的jsonld格式的内容，抽取出title、abstract和gnd_codes，
-并存为jsonline格式，方便后续读取处理"""
+"""Including functions：
+1. make `merge-subjects` dataset
 
-from pyld import jsonld
-import json
+"""
+
+import os
+import shutil
 from pathlib import Path
-from tqdm import tqdm
-from llms4subjects.instance import tibkat_db
 
 
-def parse_jsonld(jsonld_file: Path) -> str | None:
-    tibkat_id = jsonld_file.stem
+def copy_folder(src, dst, overwrite=False) -> None:
+    """
+    Copies the contents of the src folder to the dst folder.
+    If overwrite is True, it will overwrite files in dst with files from src.
+    """
+    if not os.path.exists(dst):
+        os.makedirs(dst)
 
-    # 读取JSON-LD文件
-    with open(jsonld_file, "r", encoding="utf-8") as file:
-        data = json.load(file)
+    for item in os.listdir(src):
+        src_path = os.path.join(src, item)
+        dst_path = os.path.join(dst, item)
 
-    # 使用pyld库加载和展开JSON-LD
-    expanded_data = jsonld.expand(data)
-    for e in expanded_data[0]["@graph"]:
-        id = e["@id"]
-        if "https://www.tib.eu/de/suchen/id/TIBKAT" in id:
-            title = e["http://purl.org/dc/elements/1.1/title"][0]["@value"]
-            abstract = e["http://purl.org/dc/terms/abstract"][0]["@value"]
-            gnd_codes = e["http://purl.org/dc/terms/subject"]
-            entry = {
-                "id": tibkat_id,
-                "title": title,
-                "abstract": abstract,
-                "gnd_codes": gnd_codes,
-            }
-            json_record = json.dumps(entry, ensure_ascii=False)
-            return json_record
+        if os.path.isdir(src_path):
+            copy_folder(src_path, dst_path, overwrite)
+        else:
+            if overwrite or not os.path.exists(dst_path):
+                shutil.copy2(src_path, dst_path)
+            else:
+                print(
+                    f"Skipped copying {src_path} to {dst_path} (already exists in destination)."
+                )
 
 
-def convert_jsonld_to_lines(train_dir: str, out_file: str):
-    """把文件夹train_dir下的所有的jsonld文件，读取出其中的标题和摘要，
-    作为jsonline文件的一行，进行保存，形成一个完整的jsonline文件。"""
-    with open(out_file, "w", encoding="utf-8") as f:
-        train_files = list(Path(train_dir).glob("**/*.jsonld"))
-        for jsonld_file in tqdm(train_files):
-            json_record = parse_jsonld(jsonld_file)
-            f.write(json_record + "\n")
+def merge_tibkat_subjects() -> None:
+    all_folder = "./data/shared-task-datasets/TIBKAT/all-subjects/data"
+    core_folder = "./data/shared-task-datasets/TIBKAT/tib-core-subjects/data"
+    merged_folder = "./data/shared-task-datasets/TIBKAT/merged-subjects/data"
 
+    if not os.path.exists(merged_folder):
+        os.makedirs(merged_folder)
 
-def _load_jsonline(jl_file: str) -> tuple[set, list]:
-    records = []
-    with open(jl_file, "r", encoding="utf-8") as f:
-        for line in tqdm(f.readlines()):
-            records.append(json.loads(line))
-    gnd_codes = [e["id"] for e in records]
-    return set(gnd_codes), records
+    # First, copy everything from folder_a
+    copy_folder(all_folder, merged_folder, overwrite=True)
+    copy_folder(core_folder, merged_folder, overwrite=True)
 
+    all_train_files = list(Path(all_folder, "train").glob("**/*.jsonld"))
+    print("all train files: ", len(all_train_files))
+    all_dev_files = list(Path(all_folder, "dev").glob("**/*.jsonld"))
+    print("all dev files: ", len(all_dev_files))
 
-def save_sqlite():
-    """把导出的内容存入sqlite数据库"""
-    core_gnd_codes, core_records = _load_jsonline("TIBKAT-core.jsonline")
-    all_gnd_codes, all_records = _load_jsonline("TIBKAT-all.jsonline")
-    for record in tqdm(core_records, leave=True):
-        my_id = record["id"]
-        source = "all,core" if (my_id in all_gnd_codes) else "core"
+    merged_train_files = list(Path(merged_folder, "train").glob("**/*.jsonld"))
+    print("merge train files: ", len(merged_train_files))
+    merged_dev_files = list(Path(merged_folder, "dev").glob("**/*.jsonld"))
+    print("merged dev files: ", len(merged_dev_files))
 
-        title, abstract, gnd_codes = (
-            record["title"],
-            record["abstract"],
-            record["gnd_codes"],
-        )
-        # 读出gnd_id
-        start = len("http://d-nb.info/gnd/")
-        gnd_codes = [e["@id"][start:] for e in gnd_codes]
-        tibkat_db.insert_record(my_id, title, abstract, "", gnd_codes, source)
+    # 上面处理完毕的结果中，存在en和de两个文件夹里面同名，而文件名称和内容
+    # 完全一样，此时，删除en文件夹中的同名文件
+    merged_de_files = list(Path(merged_folder).glob("**/de/*.jsonld"))
 
-    for record in tqdm(all_records, leave=True):
-        my_id = record["id"]
-        if my_id not in core_gnd_codes:
-            title, abstract, gnd_codes = (
-                record["title"],
-                record["abstract"],
-                record["gnd_codes"],
-            )
-            # 读出gnd_id
-            start = len("http://d-nb.info/gnd/")
-            gnd_codes = [e["@id"][start:] for e in gnd_codes]
-            tibkat_db.insert_record(my_id, title, abstract, "", gnd_codes, "all")
+    n_cleaned = 0
+    for f in merged_de_files:
+        en_dir = Path(f.parent.parent, "en")
+        en_file = Path(en_dir, f.name)
+        if en_file.exists():
+            print(f)
+            n_cleaned += 1
+    print("cleaned: ", n_cleaned)
+    
+    merged_train_files = list(Path(merged_folder, "train").glob("**/*.jsonld"))
+    print("final merge train files: ", len(merged_train_files))
+    merged_dev_files = list(Path(merged_folder, "dev").glob("**/*.jsonld"))
+    print("final merged dev files: ", len(merged_dev_files))
 
-    tibkat_db.close()
+def remove_duplicate():
+    merged_folder = "./data/shared-task-datasets/TIBKAT/merged-subjects/data"
+
+    merged_de_files = list(Path(merged_folder).glob("**/de/*.jsonld"))
+
+    n_cleaned = 0
+    for f in merged_de_files:
+        en_dir = Path(f.parent.parent, "en")
+        en_file = Path(en_dir, f.name)
+        if en_file.exists():
+            en_file.unlink()
+            n_cleaned += 1
+    print("cleaned: ", n_cleaned)
 
 
 if __name__ == "__main__":
-    print("convert jsonld files to jsonline file")
-    convert_jsonld_to_lines("./data/shared-task-datasets/TIBKAT/all-subjects/data/train/", "TIBKAT-all.jsonline")
-
-    convert_jsonld_to_lines("./data/shared-task-datasets/TIBKAT/tib-core-subjects/data/train/", "TIBKAT-core.jsonline")
-
-    print("save to sqlite db.")
-    save_sqlite()
+    merge_tibkat_subjects()
