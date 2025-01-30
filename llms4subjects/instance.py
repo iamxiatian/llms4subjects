@@ -25,41 +25,14 @@ from sqlite3 import Row
 
 import faiss
 import numpy as np
-from pyld import jsonld
 from tqdm import tqdm
 
 from llms4subjects.api import EMBEDDING_DIM, get_embedding
 from llms4subjects.sqlite import SqliteDb
 from llms4subjects.prompt import to_alpaca_entry
+from llms4subjects.parse import parse_jsonld
 
 logger = logging.getLogger(__name__)
-
-
-def _parse_jsonld(jsonld_file: Path) -> dict | None:
-    tibkat_id = jsonld_file.stem
-    language = jsonld_file.parent.name
-    doctype = jsonld_file.parent.parent.name
-    # 读取JSON-LD文件
-    with open(jsonld_file, "r", encoding="utf-8") as file:
-        data = json.load(file)
-
-    # 使用pyld库加载和展开JSON-LD
-    expanded_data = jsonld.expand(data)
-    for e in expanded_data[0]["@graph"]:
-        my_id = e["@id"]
-        if "https://www.tib.eu/de/suchen/id/TIBKAT" in my_id:
-            title = e["http://purl.org/dc/elements/1.1/title"][0]["@value"]
-            abstract = e["http://purl.org/dc/terms/abstract"][0]["@value"]
-            gnd_codes = e["http://purl.org/dc/terms/subject"]
-            entry = {
-                "id": tibkat_id,
-                "title": title,
-                "abstract": abstract,
-                "gnd_codes": gnd_codes,
-                "language": language,
-                "doctype": doctype,
-            }
-            return entry
 
 
 def gen_jsonline_file(
@@ -71,7 +44,7 @@ def gen_jsonline_file(
         for instance_dir in instance_dirs:
             train_files = list(Path(instance_dir).glob("**/*.jsonld"))
             for jsonld_file in tqdm(train_files):
-                entry = _parse_jsonld(jsonld_file)
+                entry = parse_jsonld(jsonld_file)
                 json_record = json.dumps(entry, ensure_ascii=False)
                 f.write(json_record + "\n")
 
@@ -390,42 +363,42 @@ class EmbeddingQuery:
         self.db.close()
 
 
-# instance_db_all = InstanceDb.open_all()
-# instance_db_core = InstanceDb.open_core()
-# instance_db_merged_no_dev = InstanceDb.open_merged_no_dev()
-# instance_db_merged_with_dev = InstanceDb.open_merged_with_dev()
+instance_db_all = InstanceDb.open_all()
+instance_db_core = InstanceDb.open_core()
+instance_db_merged_no_dev = InstanceDb.open_merged_no_dev()
+instance_db_merged_with_dev = InstanceDb.open_merged_with_dev()
 
 
-# instance_eq_all = EmbeddingQuery(Path("./db/instance/all"), instance_db_all)
-# instance_eq_core = EmbeddingQuery(Path("./db/instance/core"), instance_db_core)
-# instance_eq_merged = EmbeddingQuery(
-#     Path("./db/instance/merged_no_dev"), instance_db_merged_no_dev
-# )
-# instance_eq_merged_with_dev = EmbeddingQuery(
-#     Path("./db/instance/merged_with_dev"), instance_db_merged_with_dev
-# )
+instance_eq_all = EmbeddingQuery(Path("./db/instance/all"), instance_db_all)
+instance_eq_core = EmbeddingQuery(Path("./db/instance/core"), instance_db_core)
+instance_eq_merged_no_dev = EmbeddingQuery(
+    Path("./db/instance/merged_no_dev"), instance_db_merged_no_dev
+)
+instance_eq_merged_with_dev = EmbeddingQuery(
+    Path("./db/instance/merged_with_dev"), instance_db_merged_with_dev
+)
 
 
-# def get_instance_db(dataset_type: str) -> InstanceDb:
-#     if dataset_type == "core":
-#         return instance_db_core
-#     elif dataset_type == "all":
-#         return instance_db_all
-#     elif dataset_type == "merged_no_dev":
-#         return instance_db_merged_no_dev
-#     else:
-#         return instance_db_merged_with_dev
+def get_instance_db(dataset_type: str) -> InstanceDb:
+    if dataset_type == "core":
+        return instance_db_core
+    elif dataset_type == "all":
+        return instance_db_all
+    elif dataset_type == "merged_no_dev":
+        return instance_db_merged_no_dev
+    else:
+        return instance_db_merged_with_dev
 
 
-# def get_embedding_query(dataset_type: str) -> EmbeddingQuery:
-#     if dataset_type == "core":
-#         return instance_eq_core
-#     elif dataset_type == "all":
-#         return instance_eq_all
-#     elif dataset_type == "merged_no_dev":
-#         return instance_db_merged_no_dev
-#     else:
-#         return instance_db_merged_with_dev
+def get_embedding_query(dataset_type: str) -> EmbeddingQuery:
+    if dataset_type == "core":
+        return instance_eq_core
+    elif dataset_type == "all":
+        return instance_eq_all
+    elif dataset_type == "merged_no_dev":
+        return instance_eq_merged_no_dev
+    else:
+        return instance_eq_merged_with_dev
 
 
 def load_jsonline_file(jsonline_file: str) -> list[dict]:
