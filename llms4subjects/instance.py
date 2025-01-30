@@ -62,15 +62,18 @@ def _parse_jsonld(jsonld_file: Path) -> dict | None:
             return entry
 
 
-def gen_jsonline_file(instance_dir: str, out_jsonline_file: str) -> None:
+def gen_jsonline_file(
+    instance_dirs: list[str], out_jsonline_file: str
+) -> None:
     """把文件夹instance_dir下的所有的jsonld文件，读取出其中的标题和摘要，
     作为jsonline文件的一行，进行保存，形成一个完整的jsonline文件。"""
     with open(out_jsonline_file, "w", encoding="utf-8") as f:
-        train_files = list(Path(instance_dir).glob("**/*.jsonld"))
-        for jsonld_file in tqdm(train_files):
-            entry = _parse_jsonld(jsonld_file)
-            json_record = json.dumps(entry, ensure_ascii=False)
-            f.write(json_record + "\n")
+        for instance_dir in instance_dirs:
+            train_files = list(Path(instance_dir).glob("**/*.jsonld"))
+            for jsonld_file in tqdm(train_files):
+                entry = _parse_jsonld(jsonld_file)
+                json_record = json.dumps(entry, ensure_ascii=False)
+                f.write(json_record + "\n")
 
 
 @dataclass
@@ -216,8 +219,13 @@ class InstanceDb(SqliteDb):
         return db
 
     @classmethod
-    def open_merged(cls) -> "InstanceDb":
-        db = InstanceDb("./db/instance/merged/instance.sqlite")
+    def open_merged_no_dev(cls) -> "InstanceDb":
+        db = InstanceDb("./db/instance/merged_no_dev/instance.sqlite")
+        return db
+
+    @classmethod
+    def open_merged_with_dev(cls) -> "InstanceDb":
+        db = InstanceDb("./db/instance/merged_with_dev/instance.sqlite")
         return db
 
 
@@ -230,10 +238,78 @@ def initialize(
     jsonline_file = Path(db_home, "instance.jsonline")
 
     # 将开发集文件保存成jsonline的形式
-    gen_jsonline_file(dev_jsonld_dir, Path(db_home, "dev.jsonline").as_posix())
+    gen_jsonline_file(
+        [dev_jsonld_dir], Path(db_home, "dev.jsonline").as_posix()
+    )
 
     # 将样本文件保存成jsonline的形式
-    gen_jsonline_file(train_jsonld_dir, jsonline_file.as_posix())
+    gen_jsonline_file([train_jsonld_dir], jsonline_file.as_posix())
+
+    embedding_writer = Path(db_home, "embedding.txt").open(
+        "w", encoding="utf-8"
+    )
+    # 使用Inner Product (IP) 距离的IndexFlat
+    index: faiss.IndexFlatIP = faiss.IndexFlatIP(EMBEDDING_DIM)
+
+    embedding_id = 0
+    seq_id = 1  # instance和gnd_code的映射关系
+    jsonline_reader = jsonline_file.open("r", encoding="utf-8")
+    for line in tqdm(jsonline_reader.readlines()):
+        instance = json.loads(line)
+        tibkat_id, title, abstract, gnd_codes, language, doctype = (
+            instance["id"],
+            instance["title"],
+            instance["abstract"],
+            instance["gnd_codes"],
+            instance["language"],
+            instance["doctype"],
+        )
+
+        # 读出gnd_codes, 并保证gnd code的开始一定为"gnd:"
+        # @id的内容形式：http://d-nb.info/gnd/4028944-8，需要最右侧截取code
+        gnd_codes = [e["@id"].rsplit("/", 1)[-1] for e in gnd_codes]
+        gnd_codes = [f"gnd:{c}" for c in gnd_codes]
+
+        db.insert_instance(
+            embedding_id,
+            tibkat_id,
+            title,
+            abstract,
+            gnd_codes,
+            language,
+            doctype,
+        )
+        embedding_id += 1
+
+        for code in gnd_codes:
+            db.insert_mapping(seq_id, tibkat_id, code, language, doctype)
+            seq_id += 1
+
+        text = f"""title: "{title}"\n abstract: {abstract}"""
+        embedding = get_embedding(text)
+        embedding_writer.write(",".join([str(e) for e in embedding]))
+        embedding_writer.write("\n")
+
+        value = np.array(embedding, dtype=np.float32).reshape(1, EMBEDDING_DIM)
+        index.add(value)
+    faiss.write_index(index, Path(db_home, "embedding.idx").as_posix())
+    embedding_writer.close()
+    jsonline_reader.close()
+    db.close()
+
+
+def init_for_test(
+    train_jsonld_dir: str, dev_jsonld_dir: str, db_home: Path
+) -> None:
+    """初始化，生成embedding等文件，把train和dev数据合并到一起以充分利用数据"""
+    db_home.mkdir(parents=True, exist_ok=True)
+    db = InstanceDb(Path(db_home, "instance.sqlite").as_posix())
+    jsonline_file = Path(db_home, "instance.jsonline")
+
+    # 将样本文件和开发集文件保存成jsonline的形式
+    gen_jsonline_file(
+        [train_jsonld_dir, dev_jsonld_dir], jsonline_file.as_posix()
+    )
 
     embedding_writer = Path(db_home, "embedding.txt").open(
         "w", encoding="utf-8"
@@ -314,33 +390,42 @@ class EmbeddingQuery:
         self.db.close()
 
 
-instance_db_all = InstanceDb.open_all()
-instance_db_core = InstanceDb.open_core()
-instance_db_merged = InstanceDb.open_merged()
-
-instance_eq_all = EmbeddingQuery(Path("./db/instance/all"), instance_db_all)
-instance_eq_core = EmbeddingQuery(Path("./db/instance/core"), instance_db_core)
-instance_eq_merged = EmbeddingQuery(
-    Path("./db/instance/merged"), instance_db_merged
-)
+# instance_db_all = InstanceDb.open_all()
+# instance_db_core = InstanceDb.open_core()
+# instance_db_merged_no_dev = InstanceDb.open_merged_no_dev()
+# instance_db_merged_with_dev = InstanceDb.open_merged_with_dev()
 
 
-def get_instance_db(dataset_type: str) -> InstanceDb:
-    if dataset_type == "core":
-        return instance_db_core
-    elif dataset_type == "all":
-        return instance_db_all
-    else:
-        return instance_db_merged
+# instance_eq_all = EmbeddingQuery(Path("./db/instance/all"), instance_db_all)
+# instance_eq_core = EmbeddingQuery(Path("./db/instance/core"), instance_db_core)
+# instance_eq_merged = EmbeddingQuery(
+#     Path("./db/instance/merged_no_dev"), instance_db_merged_no_dev
+# )
+# instance_eq_merged_with_dev = EmbeddingQuery(
+#     Path("./db/instance/merged_with_dev"), instance_db_merged_with_dev
+# )
 
 
-def get_embedding_query(dataset_type: str) -> EmbeddingQuery:
-    if dataset_type == "core":
-        return instance_eq_core
-    elif dataset_type == "all":
-        return instance_eq_all
-    else:
-        return instance_eq_merged
+# def get_instance_db(dataset_type: str) -> InstanceDb:
+#     if dataset_type == "core":
+#         return instance_db_core
+#     elif dataset_type == "all":
+#         return instance_db_all
+#     elif dataset_type == "merged_no_dev":
+#         return instance_db_merged_no_dev
+#     else:
+#         return instance_db_merged_with_dev
+
+
+# def get_embedding_query(dataset_type: str) -> EmbeddingQuery:
+#     if dataset_type == "core":
+#         return instance_eq_core
+#     elif dataset_type == "all":
+#         return instance_eq_all
+#     elif dataset_type == "merged_no_dev":
+#         return instance_db_merged_no_dev
+#     else:
+#         return instance_db_merged_with_dev
 
 
 def load_jsonline_file(jsonline_file: str) -> list[dict]:
@@ -367,9 +452,9 @@ def load_jsonline_file(jsonline_file: str) -> list[dict]:
     return dataset
 
 
-def merge_all_to_alpaca(out_json_file:str):
+def merge_all_to_alpaca(out_json_file: str):
     """把merged下所有的文件，都转成alpaca"""
-    home = Path("./db/instance/merged")
+    home = Path("./db/instance/merged_no_dev")
     jsonline_file = Path(home, "instance.jsonline")
     dev_file = Path(home, "dev.jsonline")
 
@@ -403,4 +488,15 @@ if __name__ == "__main__":
     #     "./data/shared-task-datasets/TIBKAT/merged-subjects/data/dev/",
     #     Path("./db/instance/merged"),
     # )
+    # gen_jsonline_file(
+    #     "./data/shared-task-datasets/TIBKAT/merged-subjects/data/dev2/",
+    #     "./db/instance/merged/dev2.jsonline",
+    # )
+
+    # 把训练集和测试集合并到一起
+    init_for_test(
+        "./data/shared-task-datasets/TIBKAT/merged-subjects/data/train/",
+        "./data/shared-task-datasets/TIBKAT/merged-subjects/data/dev2/",
+        Path("./db/instance/merged_with_dev"),
+    )
     print("DONE.")
