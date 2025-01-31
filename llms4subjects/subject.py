@@ -78,6 +78,20 @@ class SubjectDb(SqliteDb):
         #     name TEXT NOT NULL,
         #     code TEXT NOT NULL
         # );""")
+        self.alias = {}
+        self.load_alias()
+
+    def load_alias(self):
+        n = 0
+        sql = "SELECT * from subject"
+        rows = self.query(sql, ())
+        for row in rows:
+            s = Subject.from_row(row)
+            for name in s.alternate_names:
+                self.alias[name] = s.code
+                self.alias[s.code] = name
+                n += 1
+        print(f"load {n} alias")
 
     @classmethod
     def open_core(cls) -> "SubjectDb":
@@ -130,8 +144,8 @@ class SubjectDb(SqliteDb):
         if not rows:
             print(f"Error: no subject for code: {code}")
         return rows[0]["name"]
-    
-    def get_code_by_name(self, name: str) -> str|None:
+
+    def get_code_by_name(self, name: str) -> str | None:
         sql = "SELECT code from subject WHERE name = ?"
         rows = self.query(sql=sql, parameters=(name,))
         if not rows:
@@ -141,7 +155,7 @@ class SubjectDb(SqliteDb):
 
     def num(self) -> int:
         return self.total("subject")
-    
+
     # def insert_name_code_id(
     #     self,
     #     embedding_id: int,
@@ -258,7 +272,7 @@ def initialize(gnd_file: str, db_home: Path):
 
 
 class EmbeddingQuery:
-    def __init__(self, db_path: Path, db:SubjectDb):
+    def __init__(self, db_path: Path, db: SubjectDb):
         """读取已经利用FAISS索引的数据文件以及对应的id文件"""
         idx_file = Path(db_path, "embedding.idx").as_posix()
         self.db = db
@@ -279,10 +293,8 @@ class EmbeddingQuery:
                                Related subjects: 
                                Classification Name: """)
         return self.get_namescode_by_text(text, topk)
-    
-    def get_code_by_name(
-        self, subject_name: str
-    ) -> str:
+
+    def get_code_by_name(self, subject_name: str) -> str:
         """获取和subject_name相似的条目"""
         code = self.db.get_code_by_name(subject_name)
         if code is not None:

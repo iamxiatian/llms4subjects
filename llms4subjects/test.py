@@ -15,7 +15,7 @@ from llms4subjects.subject import subject_db_all as subject_db
 def generate_gndcodes_file(
     jsonld_file: str, out_json_file: str, predictor: Predictor
 ) -> None:
-    #print(f"process {jsonld_file} => {out_json_file}")
+    print(f"process {jsonld_file} => {out_json_file}")
     record = parse_jsonld(jsonld_file)
 
     codes, names = predictor(record["title"], record["abstract"])
@@ -28,7 +28,7 @@ def run_test(test_dir: str, out_dir: str, predictor: Predictor) -> int:
     """
     遍历testset_dir，处理jsonld文件，并把结果输出到对应的output_dir
     目录中的文件
-    
+
     Args:
         test_dir: 赛方提供的测试数据集，是一个文件夹字符串，递归遍历其中包含的
             jsonld文件作为测试文件
@@ -37,7 +37,7 @@ def run_test(test_dir: str, out_dir: str, predictor: Predictor) -> int:
             结果
     Returns:
         处理的文件数量，为一个整数
-    
+
     """
     n_processed = 0
     for dirpath, _, filenames in tqdm(os.walk(test_dir)):
@@ -66,9 +66,21 @@ def run_test(test_dir: str, out_dir: str, predictor: Predictor) -> int:
     return n_processed
 
 
-if __name__ == "__main__":
-    predictor = PredictByInstance(dataset_type="merged_with_dev", topk=50)
-    n_processed = run_test(
-        test_dir="./test", out_dir="./db/test_result", predictor=predictor
+def test_by_similar_instances() -> None:
+    predictor = PredictByInstance(dataset_type="merged_with_dev", topk=100)
+    n_core = run_test(
+        test_dir="./data/test_core",
+        out_dir="./db/test_result_core",
+        predictor=predictor,
     )
-    print(f"processed: {n_processed}")
+
+    n_all = run_test(
+        test_dir="./data/test_all",
+        out_dir="./db/test_result_all",
+        predictor=predictor,
+    )
+    print(f"processed core: {n_core}, all: {n_all}")
+
+
+if __name__ == "__main__":
+    test_by_similar_instances()

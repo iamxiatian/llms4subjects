@@ -38,10 +38,19 @@ class PredictByInstance(Predictor):
                 score = 1.0 + 1.0 / rank_of_code
 
                 # 考虑出现在title和abstract时，分别加权
-                name = subject_db.get_name_by_code(code).lower()
-                if name in title.lower():
-                    score = score + 2
-                score = score + abstract.lower().count(name)
+                # 同时考虑别名信息
+                if rank_of_instance <=5:
+                    subject = subject_db.get_subject_by_code(code)
+                    names = [n.lower()  for n in subject.alternate_names if not n.isupper()]
+                    names.append(subject.name.lower())
+                    for name in names:
+                        if name in title.lower():
+                            score = score + 2
+                            break
+                        
+                        if name in abstract.lower():
+                            score = score + 1
+                            break
                 
                 # 按照文档排序，赋权
                 value = len(instances)/rank_of_instance

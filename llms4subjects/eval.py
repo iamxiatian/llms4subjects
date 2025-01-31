@@ -113,11 +113,11 @@ def eval(
     return metrics
 
 
-def eval_by_instance(dataset_type: str = "merged", dev_name: str = "dev"):
-    middle_file = f"./db/eval/{dataset_type}/by_instance_5.{dev_name}.jsonline"
-    result_file = f"./db/eval/{dataset_type}/by_instance_5.{dev_name}.txt"
+def eval_by_instance(dataset_type: str = "merged", dev_name: str = "dev", topk:int=5):
+    middle_file = f"./db/eval/{dataset_type}/by_instance_{topk}.{dev_name}.jsonline"
+    result_file = f"./db/eval/{dataset_type}/by_instance_{topk}.{dev_name}.txt"
 
-    predictor = PredictByInstance(dataset_type=dataset_type)
+    predictor = PredictByInstance(dataset_type=dataset_type,topk=topk)
     metrics = eval(dataset_type, dev_name, predictor, middle_file, result_file)
     print(metrics)
 
@@ -143,5 +143,5 @@ def eval_by_sft(dataset_type: str = "merged", dev_name: str = "dev"):
 
 if __name__ == "__main__":
     # dev2相比于dev，去除了重复出现的instance
-    eval_by_sft(dataset_type="merged", dev_name="dev2")
-    #eval_by_instance(dataset_type="merged", dev_name="dev2")
+    #eval_by_sft(dataset_type="merged", dev_name="dev2")
+    eval_by_instance(dataset_type="merged_no_dev", dev_name="dev2", topk=100)
