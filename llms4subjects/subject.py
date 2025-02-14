@@ -289,6 +289,10 @@ class EmbeddingQuery:
         self, subject_name: str, topk: int
     ) -> list[tuple[str, str]]:
         """获取和subject_name相似的条目"""
+        code = self.db.get_code_by_name(subject_name)
+        if code is not None:
+            return [(subject_name, code)]
+        
         text = textwrap.dedent(f"""Subject:{subject_name}
                                Related subjects: 
                                Classification Name: """)
