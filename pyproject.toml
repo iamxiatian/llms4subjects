@@ -27,6 +27,7 @@ numpy = "^1.26.4"
 openai = "^1.58.1"
 einops = "^0.8.0"
 ragatouille = "^0.0.8.post4"
+lancedb = "^0.20.0"
 
 
 [tool.poetry.group.dev.dependencies]

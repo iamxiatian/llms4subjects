@@ -146,6 +146,17 @@ class InstanceDb(SqliteDb):
         ids_str = ",".join([f"'{e}'" for e in instance_ids])
         sql = f"""SELECT * from instance WHERE instance_id in ({ids_str})"""
         return [Instance.from_row(row) for row in self.query(sql=sql)]
+    
+    def get_by_instance_id(self, instance_id: str) -> Instance:
+        # 加上引号， 拼接成'id1', 'id2'的形式
+        sql = "SELECT * from instance WHERE instance_id =? "
+        rows = self.query(sql=sql, parameters=(instance_id,))
+        if not rows:
+            total = self.tatal("instance")
+            message = f"no instance_id {instance_id} in {self.db_file}, \
+                total records: {total}"
+            raise Exception(message)
+        return Instance.from_row(rows[0])
 
     def get_by_embedding_id(self, embedding_id: int) -> Instance:
         sql = "SELECT * from instance WHERE embedding_id = ?"
