@@ -1,6 +1,6 @@
 import json
-import os
-from pprint import pprint
+from datetime import datetime
+import time
 
 from tqdm import tqdm
 
@@ -58,19 +58,28 @@ def main():
     dev_names_file = "./db/eval/merged/by_instance_5.dev2_with_names.jsonline"
     with open(dev_names_file, "r", encoding="utf-8") as f:
         records = [json.loads(line) for line in f.readlines()]
-    print(f"load {len(records)} records.")
-    
+    print(f"{datetime.now()}: load {len(records)} records.")
+
     llm_output_file = "./db/eval/merged/by_instance_5.dev2.llm_output.jsonline"
     with open(llm_output_file, "w", encoding="utf-8") as f:
         for lineno, r in tqdm(enumerate(records)):
+            start_time = time.time()
             answer = rerank(r)
-            data = {"lineno": lineno, "id": r["id"], "answer": answer}
+            seconds = time.time() - start_time
+            data = {
+                "lineno": lineno,
+                "id": r["id"],
+                "finish_time": f"{datetime.now()}",
+                "used_seconds": seconds,
+                "prompt": make_prompt(r),
+                "answer": answer,
+            }
             s = json.dumps(data, ensure_ascii=False)
             f.write(s)
             f.write("\n")
             f.flush()
-    print("DONE.")
+    print("{datetime.now()}: DONE.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
