@@ -18,7 +18,7 @@ class LLM:
 
         .. code-block:: python
 
-        from knowpath.llm import LLM
+        from .llm import LLM
         chatbot = LLM("http://localhost:1119/v1",
                             model="./Qwen2.5-7B-Instruct")
         response = chatbot.complete("hello")
