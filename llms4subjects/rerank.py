@@ -133,7 +133,6 @@ def generate_final_result(raw_pred_result_file:str, llm_output_file:str, final_r
         records = [json.loads(line) for line in f.readlines()]
 
     # 读取LLM再次排序后的输出文件，保存到变量 documents中
-    llm_output_file = './db/eval/merged/by_instance_5.dev2.llm_output.jsonline'
     with open(llm_output_file, "r", encoding="utf-8") as f:
         documents = [json.loads(line) for line in f.readlines()]
     
@@ -157,11 +156,15 @@ def generate_final_result(raw_pred_result_file:str, llm_output_file:str, final_r
                 r3_codes.append(code)
             
             # 保存预测结果
-            records['llm_rerank_names'] = llm_rerank_names
+            record['llm_rerank_names'] = llm_rerank_names
             record['r3_names'] = r3_names
             record['r3_codes'] = r3_codes
         
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            f.flush()
 
 if __name__ == "__main__":
-    pass
+    generate_final_result(
+        "./db/eval/merged/by_instance_5.dev2_with_names.jsonline", 
+        "./db/eval/merged/by_instance_5.dev2.llm_output.jsonline", 
+        "./db/eval/merged/r3.jsonline")
