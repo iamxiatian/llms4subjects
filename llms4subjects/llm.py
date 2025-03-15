@@ -45,7 +45,7 @@ class LLM:
         temperature: float = 0,
         n_choices: int = 1,
         use_beam_search=False,
-        max_tokens: int = 5000,
+        max_tokens: int = 10000,
         skip_special_tokens: bool = True,
     ) -> str:
         """根据输入的提示，继续续写内容。

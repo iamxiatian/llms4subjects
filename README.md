@@ -4,6 +4,12 @@
 
 模型：Snowflake/snowflake-arctic-embed-l-v2.0，突出英文和德文的能力
 
+```shell
+export HF_ENDPOINT=https://hf-mirror.com
+huggingface-cli download Snowflake/snowflake-arctic-embed-l-v2.0 --local-dir Snowflake/snowflake-arctic-embed-l-v2.0
+```
+
+
 ## Match方式：
 
 1. 对标题和摘要进行Embedding，查找出相似的文献，进而得出文献对应的GND Code，将

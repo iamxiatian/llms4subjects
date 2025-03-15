@@ -1,10 +1,12 @@
 import json
 from datetime import datetime
 import time
-
+import json
+import itertools
 from tqdm import tqdm
 
 from llms4subjects.llm import LLM
+from llms4subjects.subject import subject_eq
 
 chatbot = LLM(
     base_url="http://10.96.1.43:7832/v1",
@@ -45,7 +47,7 @@ You act as an expert in library subject indexing. Please carefully analyze the g
 """
 
 
-def rerank(record) -> str:
+def rerank_one_by_llm(record) -> str:
     prompot = make_prompt(record)
     text = chatbot.chat(user_prompt=prompot)
     data = json.loads(text)
@@ -53,7 +55,9 @@ def rerank(record) -> str:
     return answer
 
 
-def main():
+def reranking_all()->None:
+    """根据预测的结果文件，利用大模型排序，并将排序的输出结果保存到
+    llm_output_file， 供后面合并使用"""
     # 读取带有名称的数据
     dev_names_file = "./db/eval/merged/by_instance_5.dev2_with_names.jsonline"
     with open(dev_names_file, "r", encoding="utf-8") as f:
@@ -64,7 +68,7 @@ def main():
     with open(llm_output_file, "w", encoding="utf-8") as f:
         for lineno, r in tqdm(enumerate(records)):
             start_time = time.time()
-            answer = rerank(r)
+            answer = rerank_one_by_llm(r)
             seconds = time.time() - start_time
             data = {
                 "lineno": lineno,
@@ -81,5 +85,83 @@ def main():
     print("{datetime.now()}: DONE.")
 
 
+def __extract_topics(answer: str) -> list[str]:
+    """从LLM输出的答案中提取所有话题，如果没有提取到，则返回[]"""
+
+    if "### Final topic list" not in answer:
+        return []
+    
+    lines = answer.split("\n")
+
+    # 从倒数第一个话题开始提取，直到遇到 Final topic list
+    topics = itertools.takewhile(lambda x: not x.startswith("### Final topic list"), reversed(lines))
+    topics = reversed(list(topics))
+    
+    # 跳过后续多余的解释内容
+    topics = itertools.takewhile(lambda x: not (x.startswith("### Explanation") or x.strip()=="" or x.strip() == "-"), topics)
+
+    # 去除前缀和空格
+    topics = [topic.strip() for topic in topics]
+
+    # 确保所有话题都以"- "开头
+    n_symbol, n_normal = 0, 0
+    for topic in topics:
+        if topic.startswith("-") or topic.startswith("*"):
+            n_symbol += 1
+        else:
+            n_normal += 1
+    
+    # 检查是否所有话题都以符号开头，或者没有符号
+    assert n_symbol == len(topics) or n_normal == len(topics)
+    
+    if n_symbol > 0:
+        topics = [topic[1:].strip() for topic in topics if topic.startswith("-")]
+        
+    return topics
+
+    
+def __map_to_namecode(llm_topic_name:str) -> tuple[str, str]:
+    items = subject_eq.get_namecodes_by_name(llm_topic_name, 1)
+    return items[0]
+    
+def generate_final_result(raw_pred_result_file:str, llm_output_file:str, final_r3_file:str):
+    """读取原始的预测结果，以及大模型重排序的原始输出结果，合并形成最终的
+    r3结果文件"""
+    
+    # 读取开发集预测结果，保存到变量 records中
+    with open(raw_pred_result_file, "r", encoding="utf-8") as f:
+        records = [json.loads(line) for line in f.readlines()]
+
+    # 读取LLM再次排序后的输出文件，保存到变量 documents中
+    llm_output_file = './db/eval/merged/by_instance_5.dev2.llm_output.jsonline'
+    with open(llm_output_file, "r", encoding="utf-8") as f:
+        documents = [json.loads(line) for line in f.readlines()]
+    
+    with open(final_r3_file, "w", encoding="utf-8") as f:
+        for idx, (record, doc) in tqdm(enumerate(zip(records, documents))):
+            answer = doc["answer"]
+            topics = __extract_topics(answer)
+            
+            if len(topics) == 0:
+                print(f"No topics found for document {idx}")
+                # 采用默认的预测结果
+                llm_rerank_names = record["pred_names"]
+            else:
+                llm_rerank_names = topics
+        
+            r3_names = []
+            r3_codes = []
+            for name in llm_rerank_names:
+                name, code = __map_to_namecode(name)
+                r3_names.append(name)
+                r3_codes.append(code)
+            
+            # 保存预测结果
+            records['llm_rerank_names'] = llm_rerank_names
+            record['r3_names'] = r3_names
+            record['r3_codes'] = r3_codes
+        
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
 if __name__ == "__main__":
-    main()
+    pass
