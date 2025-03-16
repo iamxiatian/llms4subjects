@@ -79,8 +79,9 @@ class Score:
 
 if __name__ == "__main__":
     score = Score(
-        "./db/eval/merged/r3.jsonline",
+        "./db/eval/merged/r3_fixed.jsonline",
         "./db/eval/merged/r3_score.txt",
+        true_field = "true_codes",
         pred_field="r3_codes",
     )
 

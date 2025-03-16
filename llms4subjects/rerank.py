@@ -152,6 +152,13 @@ def generate_final_result(raw_pred_result_file:str, llm_output_file:str, final_r
             r3_codes = []
             for name in llm_rerank_names:
                 name, code = __map_to_namecode(name)
+                # 如果name在原来的pred中存在，则直接使用原来的code，而不是
+                # 查询得到的code
+                for n, c in zip(record["pred_names"], record["pred_codes"]):
+                    if n == name:
+                        code = c
+                        break
+                
                 r3_names.append(name)
                 r3_codes.append(code)
             
