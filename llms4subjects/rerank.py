@@ -9,10 +9,9 @@ from llms4subjects.llm import LLM
 from llms4subjects.subject import subject_eq
 
 chatbot = LLM(
-    base_url="http://10.96.1.43:7832/v1",
-    model="/data/app/yangyahe/base_model/Qwen-QwQ-32B-AWQ",
+    base_url="http://10.96.1.42:7832/v1",
+    model="Qwen-QwQ-32B-AWQ",
 )
-
 
 def make_prompt(record):
     topics = [f"  - {name.strip()}" for name in record["pred_names"]]
@@ -47,9 +46,8 @@ You act as an expert in library subject indexing. Please carefully analyze the g
 """
 
 
-def rerank_one_by_llm(record) -> str:
-    prompot = make_prompt(record)
-    text = chatbot.chat(user_prompt=prompot)
+def rerank_one_by_llm(prompt) -> str:
+    text = chatbot.chat(user_prompt=prompt)
     data = json.loads(text)
     answer: str = data["choices"][0]["message"]["content"]
     return answer
@@ -68,14 +66,15 @@ def reranking_all()->None:
     with open(llm_output_file, "w", encoding="utf-8") as f:
         for lineno, r in tqdm(enumerate(records)):
             start_time = time.time()
-            answer = rerank_one_by_llm(r)
+            prompt = make_prompt(r)
+            answer = rerank_one_by_llm(prompt)
             seconds = time.time() - start_time
             data = {
                 "lineno": lineno,
                 "id": r["id"],
                 "finish_time": f"{datetime.now()}",
                 "used_seconds": seconds,
-                "prompt": make_prompt(r),
+                "prompt": prompt,
                 "answer": answer,
             }
             s = json.dumps(data, ensure_ascii=False)
