@@ -1,7 +1,6 @@
 import json
 from datetime import datetime
 import time
-import json
 import itertools
 from tqdm import tqdm
 
