@@ -182,8 +182,8 @@ def generate_final_result(
         record["r3_codes"] = r3_codes
 
         # 重新保存到llm输出结果中
-        with open(llm_out_file, "w", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False, indent=2)
+        with open(llm_out_file, "w", encoding="utf-8") as f1:
+            json.dump(record, f1, ensure_ascii=False, indent=2)
 
         # 按照比赛要求，输出最终结果
         json_file = llm_out_file.with_suffix(".json")
@@ -191,9 +191,9 @@ def generate_final_result(
         result_file = os.path.join(final_result_dir, relative_path)
         Path(result_file).parent.mkdir(parents=True, exist_ok=True)
 
-        with open(result_file, "w", encoding="utf-8") as f:
+        with open(result_file, "w", encoding="utf-8") as f2:
             json.dump(
-                {"dcterms:subject": r3_codes}, ensure_ascii=False, indent=2
+                {"dcterms:subject": r3_codes}, f2, ensure_ascii=False, indent=2
             )
 
 
